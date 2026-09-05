@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Agent Regression Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">R</span><div><b>Regression Lab</b><small>Контрагент · по фактам</small></div></div>
+      <nav>
+        <button class="nav-item active" data-view="dashboard"><span>◫</span> Обзор</button>
+        <button class="nav-item" data-view="results"><span>✓</span> Результаты</button>
+        <button class="nav-item" data-view="compare"><span>⇄</span> Сравнение</button>
+        <button class="nav-item" data-view="cases"><span>⌘</span> Набор тестов</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="health"><i id="healthDot"></i><div><b id="healthText">Проверяем контур…</b><small id="healthMeta"></small></div></div>
+        <button id="tokenButton" class="ghost wide">Токен запуска</button>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div><p class="eyebrow">QUALITY CONTROL CENTER</p><h1 id="pageTitle">Обзор качества</h1></div>
+        <div class="header-actions">
+          <select id="runPicker" aria-label="Выберите прогон"></select>
+          <button id="newRunButton" class="primary"><span>＋</span> Новый прогон</button>
+        </div>
+      </header>
+
+      <section id="dashboardView" class="view active">
+        <div id="emptyState" class="empty hidden">
+          <div class="empty-icon">⌁</div><h2>Здесь появится первый честный прогон</h2>
+          <p>59 ответов, независимая LLM-оценка, ручной аудит и единый release gate.</p>
+          <button class="primary" onclick="openRunModal()">Создать прогон</button>
+        </div>
+        <div id="dashboardContent">
+          <div class="hero-grid">
+            <article class="gate-card">
+              <div class="card-top"><span>Release gate</span><span id="runStatus" class="pill">—</span></div>
+              <div class="gate-line"><strong id="gateValue">PENDING</strong><span id="gateSubtitle">Ожидает полного прогона</span></div>
+              <div class="progress"><i id="progressBar"></i></div>
+              <div class="progress-meta"><span id="progressLabel">0 из 59</span><span id="progressPercent">0%</span></div>
+            </article>
+            <article class="score-card"><div class="card-top"><span>Main GTSR</span><span class="info">i</span></div><div class="score"><strong id="gtsrValue">—</strong><small>/ 40</small></div><div id="gtsrTrend" class="threshold">Порог ≥34</div></article>
+            <article class="score-card"><div class="card-top"><span>Критические</span><span class="danger-dot"></span></div><div class="score"><strong id="criticalValue">—</strong></div><div class="threshold">Допустимо 0</div></article>
+          </div>
+
+          <div id="metricGrid" class="metric-grid"></div>
+
+          <div class="content-grid">
+            <article class="panel">
+              <div class="panel-head"><div><h2>Распределение статусов</h2><p>Автооценка с учётом ручных корректировок</p></div></div>
+              <div id="statusDistribution" class="distribution"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><h2>Скорость ответа</h2><p>Только оцениваемые запросы агента</p></div></div>
+              <div id="latencyGrid" class="latency-grid"></div>
+            </article>
+          </div>
+
+          <article class="panel recent-panel">
+            <div class="panel-head"><div><h2>Последние результаты</h2><p>Провалы и ручные проверки — первыми</p></div><button class="ghost" onclick="switchView('results')">Все ответы →</button></div>
+            <div id="recentResults" class="result-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="resultsView" class="view">
+        <div class="toolbar">
+          <div class="search"><span>⌕</span><input id="resultSearch" placeholder="ID, вопрос, ответ или ошибка"></div>
+          <select id="statusFilter"><option value="">Все статусы</option><option>PASS</option><option>PARTIAL</option><option>FAIL</option><option>CRITICAL</option><option value="UNREVIEWED">Без оценки</option></select>
+          <select id="categoryFilter"><option value="">Все категории</option></select>
+          <span id="resultCount" class="count"></span>
+        </div>
+        <div id="resultsTable" class="table-wrap"></div>
+      </section>
+
+      <section id="compareView" class="view">
+        <article class="panel compare-controls">
+          <div><h2>Сравнение версий</h2><p>Выберите два прогона, чтобы увидеть изменение качества и скорости.</p></div>
+          <div class="compare-pickers"><select id="compareA"></select><span>против</span><select id="compareB"></select><button id="compareButton" class="primary">Сравнить</button></div>
+        </article>
+        <div id="comparisonContent" class="comparison-content"></div>
+      </section>
+
+      <section id="casesView" class="view">
+        <div class="suite-banner"><div><p class="eyebrow">FROZEN SUITE · V1.1</p><h2>59 оцениваемых ответов</h2><p>40 основных + 16 повторов boundary-сценариев + 3 Web Search</p></div><div class="suite-numbers"><span><b>8</b> компаний</span><span><b>27</b> диалогов</span><span><b>0</b> скрытых retry</span></div></div>
+        <div id="caseGrid" class="case-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="runModal" class="modal-backdrop hidden"><div class="modal">
+    <button class="modal-close" onclick="closeModal('runModal')">×</button><p class="eyebrow">NEW REGRESSION</p><h2>Запустить проверку</h2>
+    <label>Название<input id="runName" placeholder="Например, Prompt v4 · final"></label>
+    <div class="form-row"><label>Версия промпта<input id="promptVersion" value="current"></label><label>LLM-судья<select id="judgeModel"></select></label></div>
+    <label>Набор<select id="runScope"><option value="full">Полный · 59 ответов</option><option value="main">Основной · 40 ответов</option><option value="boundary">Boundary · 24 ответа</option></select></label>
+    <div class="notice"><b>Перед запуском</b><span>API-вызовы расходуют квоту. Тесты заморожены, скрытые повторы не выполняются.</span></div>
+    <button id="createRunButton" class="primary wide">Создать и запустить</button>
+  </div></div>
+
+  <div id="tokenModal" class="modal-backdrop hidden"><div class="modal small">
+    <button class="modal-close" onclick="closeModal('tokenModal')">×</button><p class="eyebrow">ADMIN ACCESS</p><h2>Токен запуска</h2><p>Результаты публичны, а расходующие API операции защищены.</p>
+    <label>Admin token<input id="adminToken" type="password" autocomplete="off" placeholder="••••••••"></label>
+    <button id="saveTokenButton" class="primary wide">Сохранить на эту сессию</button>
+  </div></div>
+
+  <div id="detailDrawer" class="drawer-backdrop hidden"><aside class="drawer"><button class="modal-close" onclick="closeDrawer()">×</button><div id="drawerContent"></div></aside></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

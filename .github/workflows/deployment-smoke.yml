@@ -1,0 +1,42 @@
+name: Deployment smoke
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health-check:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Wait for autodeploy and check health
+        env:
+          APP_HEALTH_URL: ${{ secrets.APP_HEALTH_URL }}
+        run: |
+          if [ -z "$APP_HEALTH_URL" ]; then
+            echo "APP_HEALTH_URL is not configured yet; deployment smoke is skipped"
+            exit 0
+          fi
+
+          for attempt in $(seq 1 20); do
+            echo "Health check attempt ${attempt}/20"
+            response=$(curl --silent --show-error --fail --max-time 20 "$APP_HEALTH_URL" || true)
+            if echo "$response" | grep -q '"status":"ok"'; then
+              echo "Deployment is healthy"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "Deployment did not become healthy in time"
+          exit 1
+

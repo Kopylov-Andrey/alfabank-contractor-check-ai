@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.vendor/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data and IDE
+*.db
+*.sqlite*
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Frontend builds
+node_modules/
+dist/
+build/
+
