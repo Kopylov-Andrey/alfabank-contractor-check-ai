@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/algorithmic.css">
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -55,6 +56,12 @@
           </div>
 
           <div id="metricGrid" class="metric-grid"></div>
+
+          <article class="panel algorithmic-panel">
+            <div class="panel-head"><div><h2>Алгоритмический контур</h2><p>Точные факты и критические условия; не оценивает стиль, полезность и качество источников</p></div><span id="algorithmicCoverage" class="pill">—</span></div>
+            <div id="algorithmicMetricGrid" class="metric-grid algorithmic-metrics"></div>
+            <div id="algorithmicDistribution" class="distribution compact-distribution"></div>
+          </article>
 
           <div class="content-grid">
             <article class="panel">

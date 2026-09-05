@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from .algorithmic_validation import combine_evaluations, validate_answer
 from .clients import JudgeClient, YandexAgentClient
 from .config import settings
 from .database import Result, Run, SessionLocal
@@ -83,6 +84,7 @@ async def process_dialogue(
     async with semaphore:
         previous_id: str | None = None
         for result_id in result_ids:
+            algorithmic_evaluation: dict | None = None
             if _is_cancelled(run_id):
                 return
             with SessionLocal() as db:
@@ -113,6 +115,21 @@ async def process_dialogue(
                     row.raw_response = response.raw
                     db.commit()
                     case = case_from_row(row)
+                try:
+                    algorithmic_evaluation = validate_answer(case, response.text)
+                except Exception as exc:
+                    algorithmic_evaluation = {
+                        "status": "FAIL",
+                        "reason": f"Техническая ошибка алгоритмического валидатора: {exc}",
+                        "checks": [],
+                        "required_facts_total": 0,
+                        "required_facts_matched": 0,
+                        "forbidden_matches": [],
+                        "critical_flags": [],
+                        "critical_checks_inconclusive": False,
+                        "inconclusive_critical_checks": [],
+                        "requires_manual_review": True,
+                    }
                 evaluation_raw = await judge.evaluate(
                     model=model,
                     system=JUDGE_SYSTEM,
@@ -121,10 +138,11 @@ async def process_dialogue(
                     ),
                 )
                 evaluation = normalize_evaluation(evaluation_raw)
+                evaluation, final_status = combine_evaluations(evaluation, algorithmic_evaluation)
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
                     row.auto_evaluation = evaluation
-                    row.auto_status = evaluation["status"]
+                    row.auto_status = final_status
                     row.evaluated_at = _now()
                     row.state = "completed"
                     db.commit()
@@ -139,6 +157,10 @@ async def process_dialogue(
                         "reason": "Техническая ошибка при вызове агента или LLM-судьи",
                         "critical_flags": [],
                     }
+                    if algorithmic_evaluation is not None:
+                        row.auto_evaluation["algorithmic"] = algorithmic_evaluation
+                        if algorithmic_evaluation.get("status") == "CRITICAL":
+                            row.auto_status = "CRITICAL"
                     db.commit()
 
 

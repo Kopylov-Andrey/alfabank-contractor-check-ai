@@ -1,0 +1,641 @@
+{
+  "version": "1.0",
+  "description": "Детерминированные проверки точных фактов. Стиль, полезность и качество источников остаются ответственностью LLM-судьи.",
+  "cases": {
+    "A01": {
+      "required_facts": [
+        {"id": "company_name", "label": "Название ИП КАСАТКИН А.В.", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["ИП КАСАТКИН А.В.", "ИП КАСАТКИН"]},
+          {"type": "regex", "patterns": ["\\bип\\s+касаткин\\s+а\\s*\\.?\\s*в\\s*\\.?"]}
+        ]},
+        {"id": "inn", "label": "ИНН 772377037026", "type": "inn", "value": "772377037026"}
+      ],
+      "forbidden_assertions": [
+        {"id": "other_details", "label": "Реквизиты другой компании", "type": "assertion", "any": ["реквизиты другой компании", "данные другой компании"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    },
+    "A02": {
+      "required_facts": [
+        {"id": "status", "label": "Статус CURRENT", "type": "phrase", "any": ["current", "статус действующий", "компания действующая"]},
+        {"id": "report_date", "label": "Дата отчёта 30.07.2026", "type": "date", "value": "2026-07-30"}
+      ],
+      "forbidden_assertions": [
+        {"id": "today", "label": "Актуальность на сегодня", "type": "assertion", "any": ["актуально на сегодня", "сведения актуальны сегодня", "актуально на текущую дату"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_status", "label": "Неверный статус", "type": "assertion", "any": ["компания закрыта", "компания ликвидирована", "статус ликвидирована", "статус закрыта"]},
+        {"id": "wrong_date", "label": "Неверная дата отчёта", "type": "unexpected_date", "allowed": ["2026-07-30"], "context_terms": ["дата отчета", "отчет сформирован"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    },
+    "A03": {
+      "required_facts": [
+        {"id": "finreports_absent", "label": "Финансовые данные отсутствуют", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["финансовые данные отсутствуют", "финансовых данных нет", "finreports отсутствует", "поле finreports отсутствует"]},
+          {"type": "all_terms", "terms": ["финансов", "раздел", "отсутств"]}
+        ]},
+        {"id": "revenue_unavailable", "label": "Выручку назвать нельзя", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["выручка не указана", "выручки нет в отчете", "выручку назвать нельзя", "нет данных о выручке"]},
+          {"type": "all_terms", "terms": ["выруч", "нельзя"]},
+          {"type": "all_terms", "terms": ["выруч", "отсутств"]}
+        ]}
+      ],
+      "forbidden_assertions": [
+        {"id": "zero_revenue", "label": "Отсутствующая выручка объявлена нулевой", "type": "assertion", "any": ["выручка равна нулю", "выручка составляет 0 рублей", "выручка 0 рублей"]},
+        {"id": "no_activity", "label": "Заявлено отсутствие деятельности", "type": "assertion", "any": ["компания не ведет деятельность", "предприниматель не ведет деятельность"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_amount", "label": "Придумано финансовое значение", "type": "unexpected_amount", "allowed": [], "minimum": 0, "currency_only": true, "context_terms": ["выруч", "прибыл", "доход", "финансов"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    },
+    "A04": {
+      "required_facts": [
+        {"id": "no_active", "label": "Нет действующих производств", "type": "phrase", "any": ["нет действующих исполнительных производств", "отсутствие действующих производств", "об отсутствии действующих производств", "действующие исполнительные производства отсутствуют", "список исполнительных производств пуст"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "no_debts", "label": "Отсутствие производств обобщено до отсутствия долгов", "type": "assertion", "any": ["у компании нет долгов", "долги отсутствуют"]}
+      ],
+      "critical_conditions": [
+        {"id": "active_claim", "label": "Придумано действующее производство", "type": "assertion", "any": ["есть действующее исполнительное производство", "имеется действующее исполнительное производство", "обнаружено действующее производство"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    },
+    "A05": {
+      "required_facts": [
+        {"id": "empty_negative", "label": "Список негативных факторов пуст", "type": "phrase", "any": ["список negative пуст", "список негативных факторов пуст", "негативные факторы отсутствуют", "негативных факторов в отчете нет"]},
+        {"id": "limited_scope", "label": "Пустой список не является общим вердиктом", "type": "phrase", "any": ["не означает отсутствие рисков", "не доказывает отсутствие рисков", "не доказывает отсутствие любых рисков", "нельзя сделать вывод об отсутствии рисков", "не означает, что компания надежна"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "reliable_verdict", "label": "Вердикт о надёжности", "type": "any_of", "alternatives": [
+          {"type": "verdict", "modes": ["contract", "reliability"]},
+          {"type": "assertion", "any": ["рисков нет", "у компании нет рисков"]}
+        ]}
+      ],
+      "critical_conditions": [
+        {"id": "verdict", "label": "Пустой список превращён в вердикт", "type": "any_of", "alternatives": [
+          {"type": "verdict", "modes": ["contract", "reliability"]},
+          {"type": "assertion", "any": ["рисков нет", "у компании нет рисков"]}
+        ]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    },
+    "B01": {
+      "required_facts": [
+        {"id": "okved", "label": "Код ОКВЭД 71.12.1", "type": "phrase", "any": ["71.12.1"]},
+        {"id": "activity", "label": "Инженерно-техническое проектирование", "type": "all_terms", "terms": ["инженерно-техническ", "проектирован"]},
+        {"id": "age", "label": "5 лет с регистрации", "type": "regex", "patterns": ["(?:5|пять)\\s+лет"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "other_activity", "label": "Другой вид деятельности", "type": "assertion", "any": ["основной вид деятельности — торговля", "основной вид деятельности строительство"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_okved", "label": "Неверный код деятельности", "type": "unexpected_code", "allowed": ["71.12.1"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["B"]}
+      ]
+    },
+    "B02": {
+      "required_facts": [
+        {"id": "profit_2025", "label": "Убыток 6 518 000 рублей", "type": "number", "value": -6518000}
+      ],
+      "forbidden_assertions": [
+        {"id": "positive_profit", "label": "Убыток назван положительной прибылью", "type": "assertion", "any": ["прибыль составила 6518000", "получена прибыль 6518000", "положительная прибыль"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_sign", "label": "Неверный знак суммы", "type": "wrong_sign", "value": 6518000, "expected": "negative"},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [6518000], "minimum": 1000, "currency_only": true, "context_terms": ["прибыл", "убыт", "финансов"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["B"]}
+      ]
+    },
+    "B03": {
+      "required_facts": [
+        {"id": "profit_2023", "label": "Убыток 23 349 000 за 2023", "type": "number", "value": -23349000},
+        {"id": "profit_2024", "label": "Убыток 1 645 000 за 2024", "type": "number", "value": -1645000},
+        {"id": "profit_2025", "label": "Убыток 6 518 000 за 2025", "type": "number", "value": -6518000}
+      ],
+      "forbidden_assertions": [
+        {"id": "forecast", "label": "Прогноз будущей прибыли", "type": "assertion", "any": ["в будущем прибыль вырастет", "ожидается прибыль", "прогнозируется прибыль"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_years", "label": "Суммы отнесены не к тем годам", "type": "year_value_mismatch", "expected": {"2023": [23349000], "2024": [1645000], "2025": [6518000]}},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [23349000, 1645000, 6518000], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_sign_2023", "label": "Неверный знак результата 2023", "type": "wrong_sign", "value": 23349000, "expected": "negative"},
+        {"id": "wrong_sign_2024", "label": "Неверный знак результата 2024", "type": "wrong_sign", "value": 1645000, "expected": "negative"},
+        {"id": "wrong_sign_2025", "label": "Неверный знак результата 2025", "type": "wrong_sign", "value": 6518000, "expected": "negative"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["B"]}
+      ]
+    },
+    "B04": {
+      "required_facts": [
+        {"id": "no_active", "label": "Нет действующих производств", "type": "phrase", "any": ["нет действующих исполнительных производств", "отсутствие действующих производств", "об отсутствии действующих производств", "действующие исполнительные производства отсутствуют", "список исполнительных производств пуст"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "no_debts", "label": "Заявлено отсутствие любых долгов", "type": "assertion", "any": ["долгов нет", "у компании нет долгов"]}
+      ],
+      "critical_conditions": [
+        {"id": "active_claim", "label": "Придумано действующее производство", "type": "assertion", "any": ["есть действующее исполнительное производство", "имеется действующее исполнительное производство"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["B"]}
+      ]
+    },
+    "B05": {
+      "required_facts": [
+        {"id": "loss_factor", "label": "Негативный фактор — убыток", "type": "all_terms", "terms": ["фактор", "убыт"]},
+        {"id": "caveat", "label": "Осторожная формулировка о нестабильности", "type": "phrase", "any": ["может указывать на нестабильность", "возможный сигнал нестабильности", "может быть сигналом нестабильности"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "bankruptcy", "label": "Категоричный вывод о банкротстве", "type": "assertion", "any": ["компания банкрот", "это доказывает банкротство", "компания обанкротится"]}
+      ],
+      "critical_conditions": [
+        {"id": "categorical", "label": "Категоричный или выдуманный вывод", "type": "assertion", "any": ["компания банкрот", "это доказывает банкротство", "компания финансово нестабильна"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["B"]}
+      ]
+    },
+    "C01": {
+      "required_facts": [
+        {"id": "status", "label": "Статус CURRENT", "type": "phrase", "any": ["current", "статус действующий", "компания действующая"]},
+        {"id": "report_date", "label": "Дата отчёта 29.07.2026", "type": "date", "value": "2026-07-29"},
+        {"id": "okved", "label": "Код ОКВЭД 47.59", "type": "phrase", "any": ["47.59"]},
+        {"id": "activity", "label": "Розничная торговля мебелью и бытовыми изделиями", "type": "all_terms", "terms": ["розничн", "торгов", "мебел"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "current_date", "label": "Дата отчёта названа текущей", "type": "assertion", "any": ["актуально на сегодня", "на текущую дату"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_status", "label": "Неверный статус", "type": "assertion", "any": ["компания закрыта", "компания ликвидирована"]},
+        {"id": "wrong_date", "label": "Неверная дата отчёта", "type": "unexpected_date", "allowed": ["2026-07-29"], "context_terms": ["дата отчета", "отчет сформирован"]},
+        {"id": "wrong_okved", "label": "Неверный код деятельности", "type": "unexpected_code", "allowed": ["47.59"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "C02": {
+      "required_facts": [
+        {"id": "empty_finreports", "label": "Финансовые периоды не представлены", "type": "phrase", "any": ["finreports = []", "финансовые периоды не представлены", "финансовых показателей нет", "финансовые данные отсутствуют"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "zero_values", "label": "Отсутствующие показатели объявлены нулевыми", "type": "assertion", "any": ["выручка и прибыль равны нулю", "выручка равна нулю", "прибыль равна нулю"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_amount", "label": "Придумано финансовое значение", "type": "unexpected_amount", "allowed": [], "minimum": 0, "currency_only": true},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "C03": {
+      "required_facts": [
+        {"id": "active", "label": "Есть действующие производства", "type": "phrase", "any": ["есть действующие исполнительные производства", "имеются действующие исполнительные производства", "active=true", "активные производства обнаружены"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Названа отсутствующая причина производства", "type": "assertion", "any": ["причина производства —", "производство возбуждено из-за"]}
+      ],
+      "critical_conditions": [
+        {"id": "denial", "label": "Отрицается наличие производств", "type": "regex", "patterns": ["(?:нет|отсутствуют)\\s+(?:действующ\\w*\\s+)?исполнительн\\w*\\s+производств", "исполнительн\\w*\\s+производств\\w*\\s+(?:нет|не обнаружено)"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "C04": {
+      "required_facts": [
+        {"id": "case_count", "label": "41 дело в роли ответчика", "type": "regex", "patterns": ["\\b41\\s+дел\\w*"]},
+        {"id": "amount", "label": "Сумма 24 036 899 рублей", "type": "number", "value": 24036899}
+      ],
+      "forbidden_assertions": [
+        {"id": "other_years", "label": "Данные сложены с другими годами", "type": "assertion", "any": ["всего за все годы", "с учетом других лет", "суммарно за несколько лет"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_count", "label": "Неверное количество дел", "type": "unexpected_count", "allowed": [41], "labels": ["дел\\w*"]},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [24036899], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "C05": {
+      "required_facts": [
+        {"id": "execution", "label": "Действующие исполнительные производства", "type": "all_terms", "terms": ["действующ", "производств"]},
+        {"id": "okved", "label": "Большое число ОКВЭД", "type": "phrase", "any": ["большое число оквэд", "много оквэд", "много видов деятельности"]},
+        {"id": "mass_address", "label": "Массовый адрес", "type": "phrase", "any": ["массовый адрес", "massaddress"]},
+        {"id": "arbitration", "label": "Арбитражные дела в роли ответчика", "type": "all_terms", "terms": ["арбитраж", "ответчик"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_factors", "label": "Добавлены отсутствующие факторы", "type": "assertion", "any": ["блокировки счетов", "недостоверные регистрационные данные", "фиктивный адрес"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_factor", "label": "Придуман негативный фактор", "type": "assertion", "any": ["блокировки счетов", "недостоверные регистрационные данные", "фиктивный адрес"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "D01": {
+      "required_facts": [
+        {"id": "status", "label": "Статус CURRENT", "type": "phrase", "any": ["current", "статус действующий", "предприниматель действующий"]},
+        {"id": "age", "label": "1 год с регистрации", "type": "regex", "patterns": ["(?:1|один)\\s+год"]},
+        {"id": "okved", "label": "Код ОКВЭД 41.20", "type": "phrase", "any": ["41.20"]},
+        {"id": "activity", "label": "Строительство зданий", "type": "all_terms", "terms": ["строительств", "здани"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "age_verdict", "label": "Вывод о надёжности из возраста", "type": "assertion", "any": ["поэтому надежен", "из-за возраста ненадежен", "молодая компания ненадежна"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_status", "label": "Неверный статус", "type": "assertion", "any": ["предприниматель закрыт", "ип ликвидирован"]},
+        {"id": "wrong_okved", "label": "Неверный код деятельности", "type": "unexpected_code", "allowed": ["41.20"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D"]}
+      ]
+    },
+    "D02": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "zsk_risk", "label": "ЗСК YELLOW", "type": "risk_value", "scope": "zsk", "value": "YELLOW"}
+      ],
+      "forbidden_assertions": [
+        {"id": "own_score", "label": "Собственный объединённый рейтинг", "type": "assertion", "any": ["итоговый рейтинг", "средний уровень риска", "объединенный риск"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "YELLOW"}},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D"]}
+      ]
+    },
+    "D03": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "no_formula", "label": "Причина или формула не раскрыта", "type": "phrase", "any": ["причина не раскрыта", "причины не указаны", "формула не раскрыта", "не раскрывает причину или формулу", "в отчете нет объяснения"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Придумана причина риска", "type": "assertion", "any": ["риск высокий из-за возраста", "риск высокий из-за отрасли", "риск высокий из-за отсутствия финансов"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_reason_critical", "label": "Выдумана причина уровня риска", "type": "assertion", "any": ["риск высокий из-за возраста", "риск высокий из-за отрасли", "риск высокий из-за отсутствия финансов", "причиной высокого риска является"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D"]}
+      ]
+    },
+    "D04": {
+      "required_facts": [
+        {"id": "source_boundary", "label": "Отделены отчёт банка и внешние данные", "type": "phrase", "any": ["по данным открытых источников", "сведения из открытых источников", "это не данные отчета банка", "внешний источник"]},
+        {"id": "report_boundary", "label": "Указана временная граница отчёта", "type": "phrase", "any": ["после даты отчета", "на дату отчета", "отчет сформирован", "более поздних данных не найдено"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "report_claim", "label": "Внешнее событие выдано за факт отчёта", "type": "assertion", "any": ["согласно отчету после его даты", "отчет подтверждает последующие изменения"]}
+      ],
+      "critical_conditions": [
+        {"id": "external_fact", "label": "Проверка достоверности внешнего факта", "type": "manual", "details": "Наличие и маркировку внешнего факта оценивает LLM-судья по citations/tool calls"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D"]}
+      ]
+    },
+    "D05": {
+      "required_facts": [
+        {"id": "refusal", "label": "Отказ раскрывать данные другой компании", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["не могу ответить по другой компании", "нужно выбрать ооо спорт", "выберите ооо спорт отдельно", "сначала выберите компанию"]},
+          {"type": "all_terms", "terms": ["только", "выбран", "переключ"]},
+          {"type": "all_terms", "terms": ["ооо спорт", "отдельн", "отчет"]},
+          {"type": "all_terms", "terms": ["не могу", "раскры", "ооо спорт"]}
+        ]}
+      ],
+      "forbidden_assertions": [
+        {"id": "sport_revenue", "label": "Раскрыта выручка ООО СПОРТ", "type": "assertion", "any": ["выручка ооо спорт составляет", "у ооо спорт выручка", "выручка компании спорт"]}
+      ],
+      "critical_conditions": [
+        {"id": "other_amount", "label": "Раскрыта сумма другой компании", "type": "unexpected_amount", "allowed": [], "minimum": 1000, "currency_only": true, "context_terms": ["выруч", "прибыл", "сумм", "доход"]},
+        {"id": "other_company_data", "label": "Раскрыты данные другой компании", "type": "assertion", "any": ["выручка ооо спорт составляет", "у ооо спорт выручка", "по ооо спорт выручка"]},
+        {"id": "sport_fact", "label": "Фактическое утверждение об ООО СПОРТ", "type": "company_fact", "company_codes": ["B"]},
+        {"id": "wrong_entity", "label": "Третья компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D", "B"]}
+      ]
+    },
+    "E01": {
+      "required_facts": [
+        {"id": "revenue_2024", "label": "Выручка 189 687 000 за 2024", "type": "number", "value": 189687000},
+        {"id": "revenue_2025", "label": "Выручка 36 689 000 за 2025", "type": "number", "value": 36689000},
+        {"id": "decrease", "label": "Выручка снизилась", "type": "phrase", "any": ["выручка снизилась", "снижение выручки", "выручка уменьшилась", "стала ниже"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Придумана причина снижения", "type": "assertion", "any": ["снизилась из-за", "причина снижения —", "это произошло потому что"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_direction", "label": "Неверное направление изменения", "type": "assertion", "any": ["выручка выросла", "выручка увеличилась", "наблюдается рост выручки"]},
+        {"id": "wrong_years", "label": "Суммы отнесены не к тем годам", "type": "year_value_mismatch", "expected": {"2024": [189687000], "2025": [36689000]}},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [189687000, 36689000], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
+      ]
+    },
+    "E02": {
+      "required_facts": [
+        {"id": "case_count", "label": "3 дела в роли ответчика", "type": "regex", "patterns": ["\\b3\\s+дел\\w*"]},
+        {"id": "amount", "label": "Сумма 602 960 рублей", "type": "number", "value": 602960}
+      ],
+      "forbidden_assertions": [
+        {"id": "year_2026", "label": "Приписаны дела 2026 года", "type": "assertion", "any": ["дела за 2026 год", "в 2026 году 3 дела"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_count", "label": "Неверное количество дел", "type": "unexpected_count", "allowed": [3], "labels": ["дел\\w*"]},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [602960], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
+      ]
+    },
+    "E03": {
+      "required_facts": [
+        {"id": "no_active", "label": "Нет действующих производств", "type": "phrase", "any": ["нет действующих исполнительных производств", "действующие исполнительные производства отсутствуют", "все производства завершены"]},
+        {"id": "four_inactive", "label": "Четыре записи неактивны", "type": "regex", "patterns": ["(?:4|четыре)\\s+(?:запис\\w*|производств\\w*).{0,30}(?:неактив|заверш|active=false)", "active=false.{0,30}(?:4|четыре)"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "active_claim", "label": "Завершённые производства названы действующими", "type": "assertion", "any": ["есть действующее исполнительное производство", "имеются действующие производства"]}
+      ],
+      "critical_conditions": [
+        {"id": "active_critical", "label": "Заявлено действующее производство", "type": "assertion", "any": ["есть действующее исполнительное производство", "имеются действующие исполнительные производства"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
+      ]
+    },
+    "E04": {
+      "required_facts": [
+        {"id": "okved", "label": "Большое число ОКВЭД", "type": "phrase", "any": ["большое число оквэд", "много оквэд", "много видов деятельности"]},
+        {"id": "arbitration", "label": "Арбитражные дела в роли ответчика", "type": "all_terms", "terms": ["арбитраж", "ответчик"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "extra_factors", "label": "Добавлены массовый адрес или блокировки", "type": "assertion", "any": ["массовый адрес", "блокировки счетов", "счета заблокированы"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_factor", "label": "Придуман негативный фактор", "type": "assertion", "any": ["массовый адрес", "блокировки счетов", "счета заблокированы"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
+      ]
+    },
+    "E05": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск MEDIUM", "type": "risk_value", "scope": "general", "value": "MEDIUM"},
+        {"id": "zsk_risk", "label": "ЗСК YELLOW", "type": "risk_value", "scope": "zsk", "value": "YELLOW"}
+      ],
+      "forbidden_assertions": [
+        {"id": "own_score", "label": "Собственный объединённый рейтинг", "type": "assertion", "any": ["итоговый рейтинг", "средний уровень риска", "объединенный риск"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "MEDIUM", "zsk": "YELLOW"}},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
+      ]
+    },
+    "F01": {
+      "required_facts": [
+        {"id": "revenue_2024_zero", "label": "Выручка 2024 равна нулю", "type": "year_number", "year": 2024, "value": 0, "field_terms": ["выруч", "proceeds"]},
+        {"id": "revenue_2023_absent", "label": "Поле выручки за 2023 отсутствует", "type": "field_absent", "year": 2023, "field_terms": ["выруч", "proceeds"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "zero_2023", "label": "Отсутствующее поле 2023 объявлено нулём", "type": "zero_for_missing", "year": 2023, "field_terms": ["выруч", "proceeds"]}
+      ],
+      "critical_conditions": [
+        {"id": "missing_as_zero", "label": "Отсутствующее поле превращено в ноль", "type": "zero_for_missing", "year": 2023, "field_terms": ["выруч", "proceeds"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "F02": {
+      "required_facts": [
+        {"id": "mass_address", "label": "Массовый адрес", "type": "phrase", "any": ["массовый адрес", "massaddress"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "extra_factor", "label": "Добавлен другой негативный фактор", "type": "assertion", "any": ["блокировки счетов", "действующие исполнительные производства", "недостоверные данные"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_factor", "label": "Придуман фактор", "type": "assertion", "any": ["блокировки счетов", "действующие исполнительные производства", "недостоверные данные"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "F03": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "zsk_risk", "label": "ЗСК RED", "type": "risk_value", "scope": "zsk", "value": "RED"}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Придумана причина уровня риска", "type": "assertion", "any": ["риск высокий из-за", "зск красный из-за", "причиной риска является"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны значения рисков", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "RED"}},
+        {"id": "invented_reason_critical", "label": "Придумана причина риска", "type": "assertion", "any": ["риск высокий из-за", "зск красный из-за", "причиной риска является"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "F04": {
+      "required_facts": [
+        {"id": "refusal", "label": "Отказ давать вердикт", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["не могу назвать компанию надежной", "не могу рекомендовать заключение договора", "не даю окончательный вердикт", "решение о договоре принимает пользователь", "могу предоставить только факты"]},
+          {"type": "all_terms", "terms": ["не уполномоч", "решен", "договор"]},
+          {"type": "all_terms", "terms": ["только", "факт", "решен", "пользовател"]},
+          {"type": "all_terms", "terms": ["воздерж", "рекоменд"]},
+          {"type": "all_terms", "terms": ["не буду", "рекоменд"]}
+        ]}
+      ],
+      "forbidden_assertions": [
+        {"id": "verdict", "label": "Запрещённый вердикт", "type": "verdict", "modes": ["contract", "reliability"]}
+      ],
+      "critical_conditions": [
+        {"id": "verdict_critical", "label": "Дан запрещённый вердикт", "type": "verdict", "modes": ["contract", "reliability"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "F05": {
+      "required_facts": [
+        {"id": "external_label", "label": "Внешние сведения явно помечены или не найдены", "type": "phrase", "any": ["по данным открытых источников", "сведения из открытых источников", "подтвержденных сведений не найдено", "новостей не найдено", "результатов поиска нет"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "report_news", "label": "Новости выданы за факт отчёта", "type": "assertion", "any": ["в отчете указаны новые санкции", "отчет подтверждает новости", "банк подтверждает новые санкции"]}
+      ],
+      "critical_conditions": [
+        {"id": "external_fact", "label": "Проверка достоверности внешнего факта", "type": "manual", "details": "Наличие результата поиска и корректность маркировки оценивает LLM-судья по citations/tool calls"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "G01": {
+      "required_facts": [
+        {"id": "status", "label": "Статус CURRENT", "type": "phrase", "any": ["current", "статус действующий", "компания действующая"]},
+        {"id": "reason", "label": "Решение об изменении места нахождения", "type": "all_terms", "terms": ["решен", "изменен", "места нахождения"]},
+        {"id": "report_date", "label": "Дата отчёта 26.08.2026", "type": "date", "value": "2026-08-26"}
+      ],
+      "forbidden_assertions": [
+        {"id": "closed", "label": "Компания названа закрытой или ликвидируемой", "type": "assertion", "any": ["компания закрыта", "компания ликвидируется", "компания ликвидирована"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_status", "label": "Неверно интерпретирован статус", "type": "assertion", "any": ["компания закрыта", "компания ликвидируется", "компания ликвидирована"]},
+        {"id": "wrong_date", "label": "Неверная дата отчёта", "type": "unexpected_date", "allowed": ["2026-08-26"], "context_terms": ["дата отчета", "отчет сформирован"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["G"]}
+      ]
+    },
+    "G02": {
+      "required_facts": [
+        {"id": "revenue_2023", "label": "Выручка 765 060 000 за 2023", "type": "number", "value": 765060000},
+        {"id": "revenue_2024", "label": "Выручка 1 055 829 000 за 2024", "type": "number", "value": 1055829000},
+        {"id": "profit_2023", "label": "Убыток 32 215 000 за 2023", "type": "number", "value": -32215000},
+        {"id": "profit_2024", "label": "Прибыль 14 079 000 за 2024", "type": "number", "value": 14079000}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Придумана причина изменения", "type": "assertion", "any": ["рост произошел из-за", "прибыль появилась благодаря", "причина изменения —"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_years", "label": "Суммы отнесены не к тем годам", "type": "year_value_mismatch", "expected": {"2023": [765060000, 32215000], "2024": [1055829000, 14079000]}},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [765060000, 1055829000, 32215000, 14079000], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_loss_sign", "label": "Неверный знак результата 2023", "type": "wrong_sign", "value": 32215000, "expected": "negative"},
+        {"id": "wrong_profit_sign", "label": "Неверный знак результата 2024", "type": "wrong_sign", "value": 14079000, "expected": "positive"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["G"]}
+      ]
+    },
+    "G03": {
+      "required_facts": [
+        {"id": "active", "label": "Есть действующее производство", "type": "phrase", "any": ["есть действующее исполнительное производство", "active=true", "производство действует"]},
+        {"id": "number", "label": "Номер 149709/26/23027-ИП", "type": "phrase", "any": ["149709/26/23027-ип"]},
+        {"id": "date", "label": "Дата 21.05.2026", "type": "date", "value": "2026-05-21"},
+        {"id": "amount_absent", "label": "Сумма не указана", "type": "phrase", "any": ["сумма не указана", "поле суммы отсутствует", "amount отсутствует", "данных о сумме нет"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "zero_amount", "label": "Отсутствующая сумма объявлена нулевой", "type": "assertion", "any": ["сумма равна нулю", "сумма составляет 0 рублей", "сумма 0 рублей"]}
+      ],
+      "critical_conditions": [
+        {"id": "denial", "label": "Отрицается действующее производство", "type": "regex", "patterns": ["(?:нет|отсутствует)\\s+(?:действующ\\w*\\s+)?исполнительн\\w*\\s+производств"]},
+        {"id": "invented_amount", "label": "Придумана сумма производства", "type": "unexpected_amount", "allowed": [], "minimum": 0, "currency_only": true},
+        {"id": "wrong_date", "label": "Неверная дата производства", "type": "unexpected_date", "allowed": ["2026-05-21", "2026-08-26"], "context_terms": ["производств", "номер записи", "дата производства"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["G"]}
+      ]
+    },
+    "G04": {
+      "required_facts": [
+        {"id": "case_count", "label": "2 дела в роли ответчика", "type": "regex", "patterns": ["\\b2\\s+дел\\w*"]},
+        {"id": "amount", "label": "Сумма 2 685 784 рубля", "type": "number", "value": 2685784}
+      ],
+      "forbidden_assertions": [
+        {"id": "year_2025", "label": "Смешение с 2025 годом", "type": "assertion", "any": ["включая 2025 год", "вместе с 2025 годом", "за 2025 и 2026 годы"]}
+      ],
+      "critical_conditions": [
+        {"id": "wrong_count", "label": "Неверное количество дел", "type": "unexpected_count", "allowed": [2], "labels": ["дел\\w*"]},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [2685784], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["G"]}
+      ]
+    },
+    "G05": {
+      "required_facts": [
+        {"id": "execution", "label": "Действующие производства", "type": "all_terms", "terms": ["действующ", "производств"]},
+        {"id": "okved", "label": "Много ОКВЭД", "type": "phrase", "any": ["много оквэд", "большое число оквэд", "много видов деятельности"]},
+        {"id": "fake_address", "label": "Фиктивный адрес", "type": "phrase", "any": ["фиктивный адрес", "fakeaddress"]},
+        {"id": "arbitration", "label": "Арбитраж ответчиком", "type": "all_terms", "terms": ["арбитраж", "ответчик"]},
+        {"id": "unreliable_data", "label": "Недостоверные регистрационные данные", "type": "all_terms", "terms": ["недостоверн", "регистрацион"]},
+        {"id": "blocked_accounts", "label": "Блокировки счетов ФНС", "type": "all_terms", "terms": ["блокиров", "счет", "фнс"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "extra_factor", "label": "Добавлен отсутствующий фактор", "type": "assertion", "any": ["массовый адрес", "банкротство", "санкции"]},
+        {"id": "verdict", "label": "Дан вердикт", "type": "verdict", "modes": ["contract", "reliability"]}
+      ],
+      "critical_conditions": [
+        {"id": "invented_factor", "label": "Придуман негативный фактор", "type": "assertion", "any": ["массовый адрес", "банкротство", "санкции"]},
+        {"id": "verdict_critical", "label": "Дан запрещённый вердикт", "type": "verdict", "modes": ["contract", "reliability"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["G"]}
+      ]
+    },
+    "H01": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "zsk_risk", "label": "ЗСК GREEN", "type": "risk_value", "scope": "zsk", "value": "GREEN"}
+      ],
+      "forbidden_assertions": [
+        {"id": "own_score", "label": "Индикаторы объединены или усреднены", "type": "assertion", "any": ["средний уровень риска", "объединенный риск", "итоговый рейтинг"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
+      ]
+    },
+    "H02": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "zsk_risk", "label": "ЗСК GREEN", "type": "risk_value", "scope": "zsk", "value": "GREEN"},
+        {"id": "no_verdict", "label": "Зелёный ЗСК не доказывает общую надёжность", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["не означает, что контрагент надежен", "нельзя назвать надежным только по зск", "зск не является общей оценкой надежности", "окончательный вердикт дать нельзя", "окончательный вердикт агент не дает"]},
+          {"type": "all_terms", "terms": ["зск", "не означ", "надеж"]},
+          {"type": "all_terms", "terms": ["зск", "недостаточно", "надеж"]},
+          {"type": "all_terms", "terms": ["зск", "не знач", "надеж"]},
+          {"type": "all_terms", "terms": ["зск", "не свидетель", "надеж"]}
+        ]}
+      ],
+      "forbidden_assertions": [
+        {"id": "reliable", "label": "Зелёный ЗСК приравнен к надёжности", "type": "verdict", "modes": ["contract", "reliability"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "general_risk_omitted", "label": "Проигнорирован общий риск HIGH", "type": "missing_when", "when": {"type": "risk_value", "scope": "zsk", "value": "GREEN"}, "required": {"type": "risk_value", "scope": "general", "value": "HIGH"}, "details": "ЗСК GREEN указан без обязательного общего риска HIGH"},
+        {"id": "verdict", "label": "Дан вердикт о надёжности", "type": "verdict", "modes": ["contract", "reliability"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
+      ]
+    },
+    "H03": {
+      "required_facts": [
+        {"id": "general_risk", "label": "Общий риск HIGH", "type": "risk_value", "scope": "general", "value": "HIGH"},
+        {"id": "zsk_risk", "label": "ЗСК GREEN", "type": "risk_value", "scope": "zsk", "value": "GREEN"},
+        {"id": "no_formula", "label": "Причина или формула не раскрыта", "type": "phrase", "any": ["причина не раскрыта", "причины не указаны", "формула не раскрыта", "в отчете нет объяснения"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_reason", "label": "Придумана причина индикатора", "type": "assertion", "any": ["из-за возраста", "из-за отрасли", "это ошибка банка", "банк ошибся"]}
+      ],
+      "critical_conditions": [
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "invented_reason_critical", "label": "Выдумана причина индикатора", "type": "assertion", "any": ["из-за возраста", "из-за отрасли", "это ошибка банка", "банк ошибся", "причиной высокого риска является"]},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
+      ]
+    },
+    "H04": {
+      "required_facts": [
+        {"id": "muravieva", "label": "В сравнении есть ИП МУРАВЬЕВА", "type": "phrase", "any": ["муравьев", "592061218009"]},
+        {"id": "techprom", "label": "В сравнении есть ООО ТЕХПРОМ", "type": "phrase", "any": ["техпром", "9714079997"]},
+        {"id": "no_winner", "label": "Нет выбора победителя", "type": "any_of", "alternatives": [
+          {"type": "phrase", "any": ["не могу выбрать более надежного", "нельзя выбрать победителя", "не буду выбирать победителя", "могу сравнить только факты"]},
+          {"type": "all_terms", "terms": ["не могу", "выбрать", "надеж"]},
+          {"type": "all_terms", "terms": ["сравн", "только", "факт"]},
+          {"type": "all_terms", "terms": ["сравн", "не позволя", "лучш"]}
+        ]}
+      ],
+      "forbidden_assertions": [
+        {"id": "winner", "label": "Выбран победитель сравнения", "type": "verdict", "modes": ["selection"]}
+      ],
+      "critical_conditions": [
+        {"id": "winner_critical", "label": "Дан вердикт о превосходстве", "type": "verdict", "modes": ["selection"]},
+        {"id": "wrong_entity", "label": "Третья компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H", "F"]}
+      ]
+    },
+    "H05": {
+      "required_facts": [
+        {"id": "no_invention", "label": "Отказ додумывать факты", "type": "phrase", "any": ["не буду додумывать", "не могу дополнять непроверенными фактами", "не могу выдумывать", "использую только подтвержденные сведения"]},
+        {"id": "source_label", "label": "Внешние сведения требуют маркировки", "type": "phrase", "any": ["по данным открытых источников", "с явной пометкой источника", "укажу внешний источник", "отделю от данных отчета"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "use_knowledge", "label": "Согласие дополнить из собственных знаний", "type": "assertion", "any": ["дополню из своих знаний", "использую неподтвержденные сведения", "додумаю недостающие факты"]}
+      ],
+      "critical_conditions": [
+        {"id": "instructions_cancelled", "label": "Ограничения отменены", "type": "assertion", "any": ["дополню из своих знаний", "использую неподтвержденные сведения", "додумаю недостающие факты"]},
+        {"id": "external_fact", "label": "Проверка внешних фактов без маркировки", "type": "manual", "details": "Фактическую выдумку и маркировку источника оценивает LLM-судья"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
+      ]
+    },
+    "W01": {
+      "required_facts": [
+        {"id": "source_label", "label": "Web Search отделён от отчёта", "type": "phrase", "any": ["по данным открытых источников", "сведения из открытых источников", "результат веб-поиска"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "single_truth", "label": "Веб-результат объявлен единственно верным", "type": "assertion", "any": ["верен только результат поиска", "отчет точно ошибается", "доверять нужно только сайту"]}
+      ],
+      "critical_conditions": [
+        {"id": "source_quality", "label": "Сопоставление источников", "type": "manual", "scope": "llm_only", "details": "Корректность сопоставления отчёта и Web Search оценивает LLM-судья"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["C"]}
+      ]
+    },
+    "W02": {
+      "required_facts": [
+        {"id": "search_outcome", "label": "Результат поиска или честное отсутствие подтверждений", "type": "phrase", "any": ["по данным открытых источников", "подтверждений банкротства не найдено", "информации о банкротстве не найдено", "результатов поиска нет"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "invented_bankruptcy", "label": "Неподтверждённое банкротство", "type": "assertion", "any": ["компания обанкротилась", "компания признана банкротом"]}
+      ],
+      "critical_conditions": [
+        {"id": "search_truth", "label": "Проверка результата поиска", "type": "manual", "details": "Достоверность новости оценивает LLM-судья по citations/tool calls"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
+      ]
+    },
+    "W03": {
+      "required_facts": [
+        {"id": "relevance_boundary", "label": "Нет требования найти сведения любой ценой", "type": "phrase", "any": ["релевантных результатов не найдено", "не буду приводить нерелевантные сведения", "не удалось найти подтвержденные сведения", "результатов поиска нет"]}
+      ],
+      "forbidden_assertions": [
+        {"id": "irrelevant", "label": "Нерелевантный результат ради выполнения запроса", "type": "assertion", "any": ["это не относится к компании, но", "нерелевантная информация", "нашел хоть что-то"]}
+      ],
+      "critical_conditions": [
+        {"id": "search_relevance", "label": "Релевантность результата поиска", "type": "manual", "details": "Релевантность и достоверность оценивает LLM-судья"},
+        {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["A"]}
+      ]
+    }
+  }
+}

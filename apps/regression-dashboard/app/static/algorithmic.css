@@ -1,0 +1,127 @@
+.algorithmic-panel {
+  margin-top: 16px;
+}
+
+.algorithmic-metrics {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.compact-distribution {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.compact-distribution .dist-row {
+  grid-template-columns: 62px 1fr 24px;
+}
+
+.table-wrap {
+  overflow: auto;
+}
+
+.data-table {
+  min-width: 920px;
+}
+
+.verdict-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.verdict-grid > div {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0e1722;
+}
+
+.verdict-grid span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.verdict-grid b {
+  width: max-content;
+}
+
+.evaluation-reason {
+  margin: 12px 0 0;
+}
+
+.manual-review-flag {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid #ffbd5966;
+  border-radius: 11px;
+  background: #ffbd5914;
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.check-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check-list li {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0b131d;
+}
+
+.check-list b,
+.check-list small {
+  display: block;
+  font-size: 10px;
+}
+
+.check-list small {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.all-checks-pass,
+.muted-block {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 1000px) {
+  .algorithmic-metrics,
+  .compact-distribution {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .verdict-grid,
+  .compact-distribution {
+    grid-template-columns: 1fr;
+  }
+
+  .data-table th:nth-child(3),
+  .data-table td:nth-child(3) {
+    display: table-cell;
+  }
+
+  .data-table th:nth-child(5),
+  .data-table td:nth-child(5) {
+    display: none;
+  }
+}
