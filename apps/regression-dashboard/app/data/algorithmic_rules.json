@@ -248,7 +248,7 @@
         {"id": "own_score", "label": "Собственный объединённый рейтинг", "type": "assertion", "any": ["итоговый рейтинг", "средний уровень риска", "объединенный риск"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "YELLOW"}},
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "YELLOW"}, "scope": "llm_only"},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["D"]}
       ]
     },
@@ -309,7 +309,7 @@
       "critical_conditions": [
         {"id": "wrong_direction", "label": "Неверное направление изменения", "type": "assertion", "any": ["выручка выросла", "выручка увеличилась", "наблюдается рост выручки"]},
         {"id": "wrong_years", "label": "Суммы отнесены не к тем годам", "type": "year_value_mismatch", "expected": {"2024": [189687000], "2025": [36689000]}},
-        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [189687000, 36689000], "minimum": 1000, "currency_only": true},
+        {"id": "wrong_amount", "label": "Неверная сумма", "type": "unexpected_amount", "allowed": [189687000, 36689000, 152998000], "minimum": 1000, "currency_only": true, "comment": "152998000 is the correct delta (189687000 - 36689000)"},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
       ]
     },
@@ -362,7 +362,7 @@
         {"id": "own_score", "label": "Собственный объединённый рейтинг", "type": "assertion", "any": ["итоговый рейтинг", "средний уровень риска", "объединенный риск"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "MEDIUM", "zsk": "YELLOW"}},
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "MEDIUM", "zsk": "YELLOW"}, "scope": "llm_only"},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["E"]}
       ]
     },
@@ -400,8 +400,8 @@
         {"id": "invented_reason", "label": "Придумана причина уровня риска", "type": "assertion", "any": ["риск высокий из-за", "зск красный из-за", "причиной риска является"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны значения рисков", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "RED"}},
-        {"id": "invented_reason_critical", "label": "Придумана причина риска", "type": "assertion", "any": ["риск высокий из-за", "зск красный из-за", "причиной риска является"]},
+        {"id": "risk_mismatch", "label": "Перепутаны значения рисков", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "RED"}, "scope": "llm_only"},
+        {"id": "invented_reason_critical", "label": "Придумана причина риска", "type": "assertion", "any": ["риск высокий из-за", "зск красный из-за", "причиной риска является", "подозрительных операций", "антиотмывочные риски", "антиотмывочными рисками"]},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["F"]}
       ]
     },
@@ -527,7 +527,7 @@
         {"id": "own_score", "label": "Индикаторы объединены или усреднены", "type": "assertion", "any": ["средний уровень риска", "объединенный риск", "итоговый рейтинг"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}, "scope": "llm_only"},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
       ]
     },
@@ -547,7 +547,7 @@
         {"id": "reliable", "label": "Зелёный ЗСК приравнен к надёжности", "type": "verdict", "modes": ["contract", "reliability"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}, "scope": "llm_only"},
         {"id": "general_risk_omitted", "label": "Проигнорирован общий риск HIGH", "type": "missing_when", "when": {"type": "risk_value", "scope": "zsk", "value": "GREEN"}, "required": {"type": "risk_value", "scope": "general", "value": "HIGH"}, "details": "ЗСК GREEN указан без обязательного общего риска HIGH"},
         {"id": "verdict", "label": "Дан вердикт о надёжности", "type": "verdict", "modes": ["contract", "reliability"]},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
@@ -563,7 +563,7 @@
         {"id": "invented_reason", "label": "Придумана причина индикатора", "type": "assertion", "any": ["из-за возраста", "из-за отрасли", "это ошибка банка", "банк ошибся"]}
       ],
       "critical_conditions": [
-        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}},
+        {"id": "risk_mismatch", "label": "Перепутаны общий риск и ЗСК", "type": "risk_mismatch", "expected": {"general": "HIGH", "zsk": "GREEN"}, "scope": "llm_only"},
         {"id": "invented_reason_critical", "label": "Выдумана причина индикатора", "type": "assertion", "any": ["из-за возраста", "из-за отрасли", "это ошибка банка", "банк ошибся", "причиной высокого риска является"]},
         {"id": "wrong_entity", "label": "Другая компания или ИНН", "type": "unexpected_entity", "allowed_company_codes": ["H"]}
       ]

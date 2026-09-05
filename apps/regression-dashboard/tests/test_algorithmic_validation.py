@@ -150,6 +150,142 @@ def test_a01_formatted_inn_and_full_name_pass() -> None:
     assert result["critical_flags"] == []
 
 
+# ============================================================================
+# P0-1: HIGH + GREEN False CRITICAL Tests
+# ============================================================================
+
+def test_high_and_green_separated_not_critical() -> None:
+    """H01: Correctly separated HIGH and GREEN should NOT trigger risk_mismatch CRITICAL."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск: HIGH. Источник: отчёт, поле baseInfo.riskLevel\nРиск ЗСК: GREEN. Источник: отчёт, поле zskRiskLevel",
+    )
+
+    # Should NOT be CRITICAL due to proximity of HIGH and GREEN
+    assert result["status"] != "CRITICAL", f"Got CRITICAL with flags: {result['critical_flags']}"
+    # Should match required facts (both risk values present)
+    assert result["required_facts_matched"] == 2
+
+
+def test_high_green_different_order_not_critical() -> None:
+    """Risk indicators mentioned in different order should not trigger false positive."""
+    result = validate_answer(
+        CASES["H01"],
+        "Риск ЗСК — GREEN. При этом общий уровень риска компании — HIGH.",
+    )
+
+    assert result["status"] != "CRITICAL"
+
+
+def test_high_green_explicit_separation_not_critical() -> None:
+    """Explicitly stating they are different indicators should not trigger mismatch."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск HIGH, а индикатор ЗСК GREEN — это разные показатели.",
+    )
+
+    assert result["status"] != "CRITICAL"
+
+
+def test_high_green_with_negation_not_critical() -> None:
+    """Negation context should not trigger false CRITICAL."""
+    result = validate_answer(
+        CASES["H01"],
+        "Нельзя считать общий риск GREEN. В отчёте общий риск HIGH, а ЗСК GREEN.",
+    )
+
+    assert result["status"] != "CRITICAL"
+
+
+def test_high_green_multiline_not_critical() -> None:
+    """Multi-line format should not trigger false positive."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск:\nHIGH\n\nЗСК:\nGREEN",
+    )
+
+    assert result["status"] != "CRITICAL"
+
+
+def test_wrong_general_risk_detected() -> None:
+    """Wrong general risk value should be detected (at least FAIL/PARTIAL, LLM will judge severity)."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск: GREEN. ЗСК: GREEN.",
+    )
+
+    # Should at minimum FAIL/PARTIAL for wrong value (LLM will judge if CRITICAL)
+    assert result["status"] in ["FAIL", "PARTIAL", "CRITICAL"]
+    assert result["required_facts_matched"] < result["required_facts_total"]
+
+
+def test_wrong_zsk_risk_detected() -> None:
+    """Wrong ZSK value should be detected."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск HIGH. ЗСК HIGH.",
+    )
+
+    # Should fail for wrong ZSK
+    assert result["status"] in ["FAIL", "PARTIAL", "CRITICAL"]
+    assert result["required_facts_matched"] < result["required_facts_total"]
+
+
+def test_both_risks_swapped_needs_llm() -> None:
+    """Both values swapped - algorithmic can't reliably detect this semantic error, LLM will judge."""
+    result = validate_answer(
+        CASES["H01"],
+        "Общий риск GREEN, а ЗСК HIGH.",
+    )
+
+    # Algorithmic evaluator may not catch this (proximity matching limitation)
+    # LLM judge will need to determine severity
+    # We just verify it doesn't false-positive as algorithmicCRITICAL
+    assert result["status"] != "CRITICAL" or "risk_mismatch" not in str(result.get("critical_flags", []))
+
+
+# ============================================================================
+# P0-2: E01 Calculated Amount Tests
+# ============================================================================
+
+def test_calculated_delta_not_critical() -> None:
+    """E01: Correctly calculated delta should NOT trigger unexpected_amount CRITICAL."""
+    result = validate_answer(
+        CASES["E01"],
+        "Выручка компании снизилась:\n"
+        "- За 2024 год: 189 687 000 ₽\n"
+        "- За 2025 год: 36 689 000 ₽\n"
+        "- Изменение: снижение на 152 998 000 ₽ (примерно в 5,2 раза или на 80,7%).",
+    )
+
+    # Should NOT be CRITICAL for correctly calculated delta
+    assert result["status"] != "CRITICAL", f"Got CRITICAL with flags: {result['critical_flags']}"
+    # Should match required facts (both amounts + direction)
+    assert result["required_facts_matched"] >= 2
+
+
+def test_wrong_calculated_delta_still_critical() -> None:
+    """E01: Incorrectly calculated delta SHOULD trigger CRITICAL."""
+    result = validate_answer(
+        CASES["E01"],
+        "Выручка снизилась с 189 687 000 до 36 689 000 рублей, разница 180 000 000.",
+    )
+
+    # Wrong calculation should still be CRITICAL
+    assert result["status"] == "CRITICAL"
+
+
+def test_invented_amount_still_critical() -> None:
+    """E01: Completely invented amount should still trigger CRITICAL."""
+    result = validate_answer(
+        CASES["E01"],
+        "Выручка снизилась. Дополнительный риск оценивается в 200 000 000 рублей.",
+    )
+
+    # Invented amount should be CRITICAL
+    assert result["status"] == "CRITICAL"
+
+
 def test_a03_negated_zero_is_not_a_critical_amount() -> None:
     result = validate_answer(
         CASES["A03"],

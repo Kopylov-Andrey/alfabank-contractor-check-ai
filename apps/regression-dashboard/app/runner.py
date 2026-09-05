@@ -174,15 +174,22 @@ async def process_dialogue(
                     row = db.get(Result, result_id)
                     row.state = "error"
                     row.technical_error = str(exc)[:4000]
-                    row.auto_status = None
+
+                    # Always set deterministic status - never None
+                    if algorithmic_evaluation is not None and algorithmic_evaluation.get("status") == "CRITICAL":
+                        row.auto_status = "CRITICAL"
+                    else:
+                        # Default to FAIL for technical errors
+                        row.auto_status = "FAIL"
+
                     row.auto_evaluation = {
+                        "status": row.auto_status,
                         "reason": "Техническая ошибка при вызове агента или LLM-судьи",
                         "critical_flags": [],
+                        "technical_error": True,
                     }
                     if algorithmic_evaluation is not None:
                         row.auto_evaluation["algorithmic"] = algorithmic_evaluation
-                        if algorithmic_evaluation.get("status") == "CRITICAL":
-                            row.auto_status = "CRITICAL"
                     db.commit()
 
 
