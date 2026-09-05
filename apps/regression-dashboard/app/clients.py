@@ -123,18 +123,24 @@ class JudgeClient:
             endpoint = f"{endpoint}/chat/completions"
         response = await self.client.post(
             endpoint,
-            headers={"Authorization": f"Bearer {settings.judge_api_key}"},
+            headers={
+                "Authorization": f"Bearer {settings.judge_api_key}",
+                "Content-Type": "application/json",
+            },
             json={
                 "model": model,
-                "temperature": 0,
-                "response_format": {"type": "json_object"},
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
             },
         )
-        response.raise_for_status()
+
+        if response.is_error:
+            detail = response.text.strip() or "empty response body"
+            raise RuntimeError(
+                f"KAILA HTTP {response.status_code}: {detail[:2000]}"
+            )
         content = response.json()["choices"][0]["message"]["content"]
         if isinstance(content, dict):
             return content

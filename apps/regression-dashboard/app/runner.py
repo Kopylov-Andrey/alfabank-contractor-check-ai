@@ -134,9 +134,8 @@ async def process_dialogue(
                     row = db.get(Result, result_id)
                     row.state = "error"
                     row.technical_error = str(exc)[:4000]
-                    row.auto_status = "FAIL"
+                    row.auto_status = None
                     row.auto_evaluation = {
-                        "status": "FAIL",
                         "reason": "Техническая ошибка при вызове агента или LLM-судьи",
                         "critical_flags": [],
                     }
