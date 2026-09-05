@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from .cases import build_suite, public_cases
 from .config import settings
 from .database import Result, Run, get_db, init_db
+from .export import generate_csv, generate_html_report
 from .metrics import calculate_metrics
 from .runner import start_run
 
@@ -267,6 +268,44 @@ def get_run(
     if raw:
         require_admin(x_admin_token)
     return serialize_run(run, include_results=True, include_raw=raw)
+
+
+@app.get("/api/runs/{run_id}/export/csv")
+def export_csv(run_id: int, db: Session = Depends(get_db)) -> Response:
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Прогон не найден")
+    csv_content = generate_csv(run)
+    # Use ASCII-safe filename with RFC 5987 encoding for Unicode
+    safe_name = f"regression-{run.id}"
+    from urllib.parse import quote
+    encoded_name = quote(f"regression-{run.id}-{run.name}.csv".encode("utf-8"))
+    return PlainTextResponse(
+        csv_content,
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.csv"; filename*=UTF-8\'\'{encoded_name}'
+        },
+        media_type="text/csv",
+    )
+
+
+@app.get("/api/runs/{run_id}/export/pdf")
+def export_pdf(run_id: int, db: Session = Depends(get_db)) -> Response:
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Прогон не найден")
+    html_content = generate_html_report(run)
+    # Use ASCII-safe filename with RFC 5987 encoding for Unicode
+    safe_name = f"regression-{run.id}"
+    from urllib.parse import quote
+    encoded_name = quote(f"regression-{run.id}-{run.name}.html".encode("utf-8"))
+    return Response(
+        html_content,
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.html"; filename*=UTF-8\'\'{encoded_name}'
+        },
+        media_type="text/html",
+    )
 
 
 @app.patch("/api/results/{result_id}", dependencies=[Depends(require_admin)])

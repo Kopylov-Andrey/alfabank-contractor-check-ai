@@ -9,6 +9,13 @@
   white-space: nowrap;
 }
 
+.export-button {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
 .warning-button,
 .danger-button {
   border-radius: 10px;

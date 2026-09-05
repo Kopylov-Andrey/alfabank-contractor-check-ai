@@ -40,9 +40,9 @@ function renderRunPicker(selectedId=state.run?.id){
   if(selectedId!=null&&state.runs.some(r=>String(r.id)===String(selectedId)))picker.value=String(selectedId)
 }
 function renderRunControls(){
-  const run=state.run,cancelButton=$('#cancelRunButton'),deleteButton=$('#deleteRunButton'),status=$('#runActionStatus');
-  const active=Boolean(run&&activeRunStatuses.has(run.status)),deletable=Boolean(run&&deletableRunStatuses.has(run.status));
-  cancelButton.classList.toggle('hidden',!active);deleteButton.classList.toggle('hidden',!deletable);
+  const run=state.run,cancelButton=$('#cancelRunButton'),deleteButton=$('#deleteRunButton'),status=$('#runActionStatus'),csvButton=$('#exportCsvButton'),pdfButton=$('#exportPdfButton');
+  const active=Boolean(run&&activeRunStatuses.has(run.status)),deletable=Boolean(run&&deletableRunStatuses.has(run.status)),hasResults=Boolean(run&&run.results?.length>0);
+  cancelButton.classList.toggle('hidden',!active);deleteButton.classList.toggle('hidden',!deletable);csvButton.classList.toggle('hidden',!hasResults);pdfButton.classList.toggle('hidden',!hasResults);
   cancelButton.disabled=Boolean(state.runAction||run?.cancel_requested);deleteButton.disabled=Boolean(state.runAction);
   cancelButton.textContent=run?.cancel_requested?'Остановка запрошена':'Остановить прогон';
   const statusText=run?.cancel_requested&&active?'Запрошена остановка':state.runAction==='cancel'?'Запрашиваем остановку…':state.runAction==='delete'?'Удаляем прогон…':'';
@@ -177,8 +177,17 @@ async function deleteCurrentRun(){
   }catch(e){toast(e.message,true)}finally{state.runAction=null;renderRunControls()}
 }
 
+function exportCsv(){
+  if(!state.run)return;
+  window.open(`/api/runs/${state.run.id}/export/csv`,'_blank')
+}
+function exportPdf(){
+  if(!state.run)return;
+  window.open(`/api/runs/${state.run.id}/export/pdf`,'_blank')
+}
+
 async function init(){
-  $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#newRunButton').onclick=openRunModal;$('#cancelRunButton').onclick=cancelCurrentRun;$('#deleteRunButton').onclick=deleteCurrentRun;$('#runPicker').onchange=e=>loadRun(e.target.value);$('#resultSearch').oninput=filterResults;$('#statusFilter').onchange=filterResults;$('#categoryFilter').onchange=filterResults;$('#compareButton').onclick=compareRuns;$('#createRunButton').onclick=createAndStart;
+  $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#newRunButton').onclick=openRunModal;$('#cancelRunButton').onclick=cancelCurrentRun;$('#deleteRunButton').onclick=deleteCurrentRun;$('#exportCsvButton').onclick=exportCsv;$('#exportPdfButton').onclick=exportPdf;$('#runPicker').onchange=e=>loadRun(e.target.value);$('#resultSearch').oninput=filterResults;$('#statusFilter').onchange=filterResults;$('#categoryFilter').onchange=filterResults;$('#compareButton').onclick=compareRuns;$('#createRunButton').onclick=createAndStart;
   $('#tokenButton').onclick=()=>{$('#adminToken').value=token();$('#tokenModal').classList.remove('hidden')};$('#saveTokenButton').onclick=()=>{sessionStorage.setItem('adminToken',$('#adminToken').value);closeModal('tokenModal');toast('Токен сохранён до закрытия вкладки')};
   $('#detailDrawer').onclick=e=>{if(e.target.id==='detailDrawer')closeDrawer()};
   try{const [config,cases]=await Promise.all([api('/api/config'),api('/api/cases')]);state.config=config;state.cases=cases;$('#judgeModel').innerHTML=config.judge_models.map(m=>`<option ${m===config.default_judge_model?'selected':''}>${esc(m)}</option>`).join('');await Promise.all([loadHealth(),loadRuns()])}catch(e){toast(e.message,true)}
