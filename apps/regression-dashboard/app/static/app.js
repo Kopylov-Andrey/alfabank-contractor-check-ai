@@ -1,4 +1,6 @@
-const state={runs:[],run:null,cases:null,config:null,poll:null};
+const state={runs:[],run:null,cases:null,config:null,poll:null,runAction:null};
+const activeRunStatuses=new Set(['queued','running']);
+const deletableRunStatuses=new Set(['completed','failed','cancelled','draft']);
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const token=()=>sessionStorage.getItem('adminToken')||'';
@@ -33,18 +35,36 @@ async function loadHealth(){
   try{const h=await api('/api/health');$('#healthDot').className=h.agent_configured&&h.judge_configured?'ok':'bad';$('#healthText').textContent=h.agent_configured&&h.judge_configured?'Контур готов':'Нужна настройка';$('#healthMeta').textContent=`${h.database} · agent ${h.agent_configured?'on':'off'} · judge ${h.judge_configured?'on':'off'}`}
   catch{$('#healthDot').className='bad';$('#healthText').textContent='Backend недоступен'}
 }
+function renderRunPicker(selectedId=state.run?.id){
+  const picker=$('#runPicker');picker.disabled=!state.runs.length;picker.innerHTML=state.runs.length?state.runs.map(r=>`<option value="${r.id}">${esc(r.name)} · ${r.status}</option>`).join(''):'<option>Прогонов пока нет</option>';
+  if(selectedId!=null&&state.runs.some(r=>String(r.id)===String(selectedId)))picker.value=String(selectedId)
+}
+function renderRunControls(){
+  const run=state.run,cancelButton=$('#cancelRunButton'),deleteButton=$('#deleteRunButton'),status=$('#runActionStatus');
+  const active=Boolean(run&&activeRunStatuses.has(run.status)),deletable=Boolean(run&&deletableRunStatuses.has(run.status));
+  cancelButton.classList.toggle('hidden',!active);deleteButton.classList.toggle('hidden',!deletable);
+  cancelButton.disabled=Boolean(state.runAction||run?.cancel_requested);deleteButton.disabled=Boolean(state.runAction);
+  cancelButton.textContent=run?.cancel_requested?'Остановка запрошена':'Остановить прогон';
+  const statusText=run?.cancel_requested&&active?'Запрошена остановка':state.runAction==='cancel'?'Запрашиваем остановку…':state.runAction==='delete'?'Удаляем прогон…':'';
+  status.textContent=statusText;status.classList.toggle('hidden',!statusText)
+}
+function renderRunViews(){
+  renderDashboard();
+  if($('#resultsView').classList.contains('active'))renderResults();
+  if($('#compareView').classList.contains('active'))renderCompareSelectors()
+}
 async function loadRuns(preferred){
   state.runs=await api('/api/runs');
-  const picker=$('#runPicker');picker.innerHTML=state.runs.length?state.runs.map(r=>`<option value="${r.id}">${esc(r.name)} · ${r.status}</option>`).join(''):'<option>Прогонов пока нет</option>';
-  const id=preferred||state.run?.id||state.runs[0]?.id;
-  if(id){picker.value=String(id);await loadRun(id)}else{state.run=null;renderDashboard()}
+  const requested=preferred??state.run?.id;const selected=state.runs.find(r=>String(r.id)===String(requested))||state.runs[0];
+  renderRunPicker(selected?.id);
+  if(selected)await loadRun(selected.id);else{state.run=null;renderRunViews()}
 }
 async function loadRun(id){
-  state.run=await api(`/api/runs/${id}`);renderDashboard();
+  state.run=await api(`/api/runs/${id}`);renderRunPicker(state.run.id);renderRunViews();
   if(['queued','running'].includes(state.run.status)){if(!state.poll)state.poll=setInterval(()=>refreshCurrent(),2500)}else if(state.poll){clearInterval(state.poll);state.poll=null}
 }
 async function refreshCurrent(){if(!state.run)return;await loadRun(state.run.id);await loadRunsLight()}
-async function loadRunsLight(){state.runs=await api('/api/runs')}
+async function loadRunsLight(){state.runs=await api('/api/runs');renderRunPicker(state.run?.id)}
 
 function metricCard(label,m,threshold,invert=false){
   const value=m?.percent==null?(m?.value??'—'):fmtPct(m.percent);const ok=m?.pass;
@@ -52,7 +72,7 @@ function metricCard(label,m,threshold,invert=false){
 }
 function algorithmicMetric(label,value,meta){return `<article class="metric-card"><div class="label">${label}</div><strong>${value}</strong><small>${meta}</small></article>`}
 function renderDashboard(){
-  const empty=!state.run;$('#emptyState').classList.toggle('hidden',!empty);$('#dashboardContent').classList.toggle('hidden',empty);if(empty)return;
+  renderRunControls();const empty=!state.run;$('#emptyState').classList.toggle('hidden',!empty);$('#dashboardContent').classList.toggle('hidden',empty);if(empty)return;
   const r=state.run,m=r.metrics,p=m.progress;
   $('#runStatus').textContent=r.status.toUpperCase();$('#gateValue').textContent=m.release_gate;$('#gateValue').className=m.release_gate==='PASS'?'pass-text':m.release_gate==='FAIL'?'fail-text':'';
   $('#gateSubtitle').textContent=m.release_gate==='PASS'?'Все критерии выполнены':m.release_gate==='FAIL'?'Есть непройденные критерии':'Ожидает полного прогона';
@@ -124,8 +144,41 @@ async function createAndStart(){
   const btn=$('#createRunButton');btn.disabled=true;btn.textContent='Создаём…';try{const run=await api('/api/runs',{method:'POST',admin:true,body:JSON.stringify({name:$('#runName').value,prompt_version:$('#promptVersion').value,judge_model:$('#judgeModel').value,scope:$('#runScope').value})});await api(`/api/runs/${run.id}/start`,{method:'POST',admin:true});closeModal('runModal');toast('Прогон запущен');await loadRuns(run.id)}catch(e){toast(e.message,true)}finally{btn.disabled=false;btn.textContent='Создать и запустить'}
 }
 
+function requestAdminToken(){
+  $('#adminToken').value=token();$('#tokenModal').classList.remove('hidden');toast('Укажите admin token',true)
+}
+async function cancelCurrentRun(){
+  const run=state.run;if(!run||!activeRunStatuses.has(run.status)||run.cancel_requested)return;
+  if(!token()){requestAdminToken();return}
+  if(!window.confirm(`Остановить прогон «${run.name}»? Уже выполняющийся запрос может завершиться.`))return;
+  state.runAction='cancel';renderRunControls();
+  try{
+    await api(`/api/runs/${run.id}/cancel`,{method:'POST',admin:true});
+    if(state.run?.id===run.id)state.run.cancel_requested=true;
+    renderRunControls();toast('Запрошена остановка прогона');
+    if(!state.poll)state.poll=setInterval(()=>refreshCurrent(),2500);
+    await refreshCurrent()
+  }catch(e){toast(e.message,true)}finally{state.runAction=null;renderRunControls()}
+}
+function clearDeletedRunViews(){
+  closeDrawer();$('#resultsTable').innerHTML='';$('#resultCount').textContent='';$('#recentResults').innerHTML=''
+}
+async function deleteCurrentRun(){
+  const run=state.run;if(!run||!deletableRunStatuses.has(run.status))return;
+  if(!token()){requestAdminToken();return}
+  const warning=`Удалить прогон «${run.name}»? Все его результаты будут удалены без возможности восстановления.`;
+  if(!window.confirm(warning))return;
+  state.runAction='delete';renderRunControls();
+  try{
+    await api(`/api/runs/${run.id}`,{method:'DELETE',admin:true});
+    if(state.poll){clearInterval(state.poll);state.poll=null}
+    state.runs=state.runs.filter(item=>item.id!==run.id);state.run=null;clearDeletedRunViews();renderRunPicker();renderRunViews();
+    toast(`Прогон «${run.name}» удалён`);await loadRuns()
+  }catch(e){toast(e.message,true)}finally{state.runAction=null;renderRunControls()}
+}
+
 async function init(){
-  $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#newRunButton').onclick=openRunModal;$('#runPicker').onchange=e=>loadRun(e.target.value);$('#resultSearch').oninput=filterResults;$('#statusFilter').onchange=filterResults;$('#categoryFilter').onchange=filterResults;$('#compareButton').onclick=compareRuns;$('#createRunButton').onclick=createAndStart;
+  $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$('#newRunButton').onclick=openRunModal;$('#cancelRunButton').onclick=cancelCurrentRun;$('#deleteRunButton').onclick=deleteCurrentRun;$('#runPicker').onchange=e=>loadRun(e.target.value);$('#resultSearch').oninput=filterResults;$('#statusFilter').onchange=filterResults;$('#categoryFilter').onchange=filterResults;$('#compareButton').onclick=compareRuns;$('#createRunButton').onclick=createAndStart;
   $('#tokenButton').onclick=()=>{$('#adminToken').value=token();$('#tokenModal').classList.remove('hidden')};$('#saveTokenButton').onclick=()=>{sessionStorage.setItem('adminToken',$('#adminToken').value);closeModal('tokenModal');toast('Токен сохранён до закрытия вкладки')};
   $('#detailDrawer').onclick=e=>{if(e.target.id==='detailDrawer')closeDrawer()};
   try{const [config,cases]=await Promise.all([api('/api/config'),api('/api/cases')]);state.config=config;state.cases=cases;$('#judgeModel').innerHTML=config.judge_models.map(m=>`<option ${m===config.default_judge_model?'selected':''}>${esc(m)}</option>`).join('');await Promise.all([loadHealth(),loadRuns()])}catch(e){toast(e.message,true)}

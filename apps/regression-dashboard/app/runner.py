@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .algorithmic_validation import combine_evaluations, validate_answer
 from .clients import JudgeClient, YandexAgentClient
@@ -21,7 +21,8 @@ def _now() -> datetime:
 
 def _is_cancelled(run_id: int) -> bool:
     with SessionLocal() as db:
-        return bool(db.get(Run, run_id).cancel_requested)
+        run = db.get(Run, run_id)
+        return run is None or bool(run.cancel_requested)
 
 
 async def execute_run(run_id: int) -> None:
@@ -30,6 +31,13 @@ async def execute_run(run_id: int) -> None:
     try:
         with SessionLocal() as db:
             run = db.get(Run, run_id)
+            if not run:
+                return
+            if run.cancel_requested:
+                run.status = "cancelled"
+                run.finished_at = _now()
+                db.commit()
+                return
             run.status = "running"
             run.started_at = _now()
             db.commit()
@@ -46,27 +54,39 @@ async def execute_run(run_id: int) -> None:
             *(process_dialogue(run_id, ids, model, semaphore, agent, judge) for ids in groups.values())
         )
 
-        if _is_cancelled(run_id):
-            with SessionLocal() as db:
-                run = db.get(Run, run_id)
-                run.status = "cancelled"
-                run.finished_at = _now()
-                db.commit()
-            return
-
+        finished_at = _now()
         with SessionLocal() as db:
-            run = db.get(Run, run_id)
-            run.status = "completed"
-            run.finished_at = _now()
+            completed = db.execute(
+                update(Run)
+                .where(
+                    Run.id == run_id,
+                    Run.status == "running",
+                    Run.cancel_requested.is_(False),
+                )
+                .values(status="completed", finished_at=finished_at)
+            )
+            if not completed.rowcount:
+                db.execute(
+                    update(Run)
+                    .where(Run.id == run_id, Run.cancel_requested.is_(True))
+                    .values(status="cancelled", finished_at=finished_at)
+                )
             db.commit()
     except Exception as exc:
+        finished_at = _now()
         with SessionLocal() as db:
-            run = db.get(Run, run_id)
-            if run:
-                run.status = "failed"
-                run.error = str(exc)[:4000]
-                run.finished_at = _now()
-                db.commit()
+            failed = db.execute(
+                update(Run)
+                .where(Run.id == run_id, Run.cancel_requested.is_(False))
+                .values(status="failed", error=str(exc)[:4000], finished_at=finished_at)
+            )
+            if not failed.rowcount:
+                db.execute(
+                    update(Run)
+                    .where(Run.id == run_id, Run.cancel_requested.is_(True))
+                    .values(status="cancelled", finished_at=finished_at)
+                )
+            db.commit()
     finally:
         await agent.close()
         await judge.close()
@@ -99,6 +119,8 @@ async def process_dialogue(
                 if not previous_id:
                     setup_response = await agent.ask(setup)
                     previous_id = setup_response.response_id
+                    if _is_cancelled(run_id):
+                        return
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
                     question = row.question

@@ -2,6 +2,38 @@
   margin-top: 16px;
 }
 
+.run-action-status {
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.warning-button,
+.danger-button {
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-weight: 800;
+}
+
+.warning-button {
+  border: 1px solid #ffbd5966;
+  background: #ffbd5914;
+  color: var(--amber);
+}
+
+.danger-button {
+  border: 1px solid #ff5f7066;
+  background: #ff5f7014;
+  color: var(--red);
+}
+
+.warning-button:disabled,
+.danger-button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
 .algorithmic-metrics {
   grid-template-columns: repeat(5, 1fr);
 }

@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .cases import build_suite, public_cases
@@ -16,6 +16,10 @@ from .config import settings
 from .database import Result, Run, get_db, init_db
 from .metrics import calculate_metrics
 from .runner import start_run
+
+
+ACTIVE_RUN_STATUSES = {"queued", "running"}
+DELETABLE_RUN_STATUSES = {"completed", "failed", "cancelled", "draft"}
 
 
 @asynccontextmanager
@@ -202,9 +206,52 @@ def cancel_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Прогон не найден")
-    run.cancel_requested = True
+    if run.status == "cancelled":
+        return {"status": "cancelled", "run_id": run.id, "cancel_requested": True}
+    if run.status not in ACTIVE_RUN_STATUSES:
+        raise HTTPException(409, "Остановить можно только queued/running прогон")
+    if run.cancel_requested:
+        return {"status": "cancellation_requested", "run_id": run.id, "cancel_requested": True}
+    changed = db.execute(
+        update(Run)
+        .where(
+            Run.id == run.id,
+            Run.status.in_(ACTIVE_RUN_STATUSES),
+            Run.cancel_requested.is_(False),
+        )
+        .values(cancel_requested=True)
+    )
     db.commit()
-    return {"status": "cancellation_requested"}
+    if not changed.rowcount:
+        db.expire_all()
+        current = db.get(Run, run_id)
+        if not current:
+            raise HTTPException(404, "Прогон не найден")
+        if current.status == "cancelled" or (
+            current.status in ACTIVE_RUN_STATUSES and current.cancel_requested
+        ):
+            return {
+                "status": "cancelled" if current.status == "cancelled" else "cancellation_requested",
+                "run_id": current.id,
+                "cancel_requested": True,
+            }
+        raise HTTPException(409, "Остановить можно только queued/running прогон")
+    return {"status": "cancellation_requested", "run_id": run.id, "cancel_requested": True}
+
+
+@app.delete("/api/runs/{run_id}", dependencies=[Depends(require_admin)])
+def delete_run(run_id: int, db: Session = Depends(get_db)) -> dict:
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Прогон не найден")
+    if run.status in ACTIVE_RUN_STATUSES:
+        raise HTTPException(409, "Сначала остановите прогон и дождитесь статуса cancelled")
+    if run.status not in DELETABLE_RUN_STATUSES:
+        raise HTTPException(409, f"Прогон в статусе {run.status} удалить нельзя")
+    deleted = {"status": "deleted", "run_id": run.id, "name": run.name}
+    db.delete(run)
+    db.commit()
+    return deleted
 
 
 @app.get("/api/runs/{run_id}")
