@@ -184,7 +184,7 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)) -> dict:
 
 
 @app.post("/api/runs/{run_id}/start", dependencies=[Depends(require_admin)])
-def launch_run(run_id: int, db: Session = Depends(get_db)) -> dict:
+async def launch_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Прогон не найден")
