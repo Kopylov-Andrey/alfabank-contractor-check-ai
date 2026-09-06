@@ -971,6 +971,7 @@ def combine_evaluations(
         algorithmic["status"] = algorithmic_status
 
     intrinsic_review = bool(algorithmic.get("requires_manual_review"))
+    llm_review = bool(combined.get("requires_manual_review"))
     if algorithmic_status == "CRITICAL":
         final_status = "CRITICAL"
         algorithmic["requires_manual_review"] = intrinsic_review
@@ -991,4 +992,9 @@ def combine_evaluations(
         algorithmic["requires_manual_review"] = needs_review
 
     combined["algorithmic"] = algorithmic
+    combined["requires_manual_review"] = bool(
+        llm_review or algorithmic.get("requires_manual_review")
+        or algorithmic_status != llm_status
+        or algorithmic.get("critical_checks_inconclusive")
+    )
     return combined, final_status

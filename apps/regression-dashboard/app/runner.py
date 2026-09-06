@@ -15,6 +15,12 @@ from .evaluation import JUDGE_SYSTEM, judge_payload, normalize_evaluation
 RUN_TASKS: dict[int, asyncio.Task] = {}
 
 
+class RunTechnicalError(RuntimeError):
+    def __init__(self, message: str, *, kind: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -22,25 +28,27 @@ def _now() -> datetime:
 def _is_cancelled(run_id: int) -> bool:
     with SessionLocal() as db:
         run = db.get(Run, run_id)
-        return run is None or bool(run.cancel_requested)
+        return run is None or run.status not in {"queued", "running"} or bool(run.cancel_requested)
 
 
 async def execute_run(run_id: int) -> None:
-    agent = YandexAgentClient()
-    judge = JudgeClient()
+    agent = judge = None
+    children: list[asyncio.Task] = []
+    claimed = False
+    error = None
+    interrupted = False
     try:
         with SessionLocal() as db:
-            run = db.get(Run, run_id)
-            if not run:
-                return
-            if run.cancel_requested:
-                run.status = "cancelled"
-                run.finished_at = _now()
-                db.commit()
-                return
-            run.status = "running"
-            run.started_at = _now()
+            changed = db.execute(update(Run).where(Run.id == run_id, Run.status == "queued")
+                                 .values(status="running", started_at=_now()))
             db.commit()
+            if not changed.rowcount:
+                return
+            claimed = True
+            db.expire_all()
+            run = db.get(Run, run_id)
+            if run.cancel_requested:
+                return
             model = run.judge_model
             ordered = db.scalars(
                 select(Result).where(Result.run_id == run_id).order_by(Result.position)
@@ -49,48 +57,44 @@ async def execute_run(run_id: int) -> None:
             for row in ordered:
                 groups.setdefault(row.dialogue_key, []).append(row.id)
 
+        agent = YandexAgentClient()
+        judge = JudgeClient()
         semaphore = asyncio.Semaphore(settings.max_concurrency)
-        await asyncio.gather(
-            *(process_dialogue(run_id, ids, model, semaphore, agent, judge) for ids in groups.values())
-        )
-
-        finished_at = _now()
-        with SessionLocal() as db:
-            completed = db.execute(
-                update(Run)
-                .where(
-                    Run.id == run_id,
-                    Run.status == "running",
-                    Run.cancel_requested.is_(False),
-                )
-                .values(status="completed", finished_at=finished_at)
-            )
-            if not completed.rowcount:
-                db.execute(
-                    update(Run)
-                    .where(Run.id == run_id, Run.cancel_requested.is_(True))
-                    .values(status="cancelled", finished_at=finished_at)
-                )
-            db.commit()
+        children = [asyncio.create_task(process_dialogue(run_id, ids, model, semaphore, agent, judge))
+                    for ids in groups.values()]
+        # A failed dialogue must not leave siblings writing after terminal status.
+        outcomes = await asyncio.gather(*children, return_exceptions=True)
+        failures = [value for value in outcomes if isinstance(value, BaseException)]
+        if failures:
+            error = str(failures[0])[:4000] or "Работа диалога прервана"
+    except asyncio.CancelledError:
+        interrupted = True
+        error = "Worker остановлен до окончания прогона. Автоматического возобновления нет."
     except Exception as exc:
-        finished_at = _now()
-        with SessionLocal() as db:
-            failed = db.execute(
-                update(Run)
-                .where(Run.id == run_id, Run.cancel_requested.is_(False))
-                .values(status="failed", error=str(exc)[:4000], finished_at=finished_at)
-            )
-            if not failed.rowcount:
-                db.execute(
-                    update(Run)
-                    .where(Run.id == run_id, Run.cancel_requested.is_(True))
-                    .values(status="cancelled", finished_at=finished_at)
-                )
-            db.commit()
+        error = str(exc)[:4000]
     finally:
-        await agent.close()
-        await judge.close()
-        RUN_TASKS.pop(run_id, None)
+        for child in children:
+            if not child.done():
+                child.cancel()
+        await asyncio.gather(*children, return_exceptions=True)
+        for client in (agent, judge):
+            if client:
+                try:
+                    await client.close()
+                except Exception as exc:
+                    error = error or str(exc)[:4000]
+        if claimed:
+            with SessionLocal() as db:
+                run = db.get(Run, run_id)
+                if run and run.status == "running":
+                    run.status = "cancelled" if run.cancel_requested else "failed" if error else "completed"
+                    run.finished_at = _now()
+                    run.error = error
+                    db.execute(update(Result).where(Result.run_id == run_id, Result.state == "running")
+                               .values(state="interrupted" if interrupted or error else "cancelled"))
+                    db.commit()
+        if RUN_TASKS.get(run_id) is asyncio.current_task():
+            RUN_TASKS.pop(run_id, None)
 
 
 async def process_dialogue(
@@ -109,6 +113,8 @@ async def process_dialogue(
                 return
             with SessionLocal() as db:
                 row = db.get(Result, result_id)
+                if row is None:
+                    return
                 row.state = "running"
                 db.commit()
                 setup = (
@@ -117,17 +123,31 @@ async def process_dialogue(
                 )
             try:
                 if not previous_id:
-                    setup_response = await agent.ask(setup)
+                    if _is_cancelled(run_id):
+                        return
+                    try:
+                        setup_response = await agent.ask(setup)
+                    except Exception as exc:
+                        raise RunTechnicalError(f"Техническая ошибка агента: {exc}", kind="agent") from exc
                     previous_id = setup_response.response_id
                     if _is_cancelled(run_id):
                         return
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
+                    if row is None:
+                        return
                     question = row.question
-                response = await agent.ask(question, previous_id)
+                if _is_cancelled(run_id):
+                    return
+                try:
+                    response = await agent.ask(question, previous_id)
+                except Exception as exc:
+                    raise RunTechnicalError(f"Техническая ошибка агента: {exc}", kind="agent") from exc
                 previous_id = response.response_id
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
+                    if row is None:
+                        return
                     row.answer = response.text
                     row.response_id = response.response_id
                     row.latency_ms = response.latency_ms
@@ -137,56 +157,58 @@ async def process_dialogue(
                     row.raw_response = response.raw
                     db.commit()
                     case = case_from_row(row)
+                if _is_cancelled(run_id):
+                    return
                 try:
                     algorithmic_evaluation = validate_answer(case, response.text)
                 except Exception as exc:
-                    algorithmic_evaluation = {
-                        "status": "FAIL",
-                        "reason": f"Техническая ошибка алгоритмического валидатора: {exc}",
-                        "checks": [],
-                        "required_facts_total": 0,
-                        "required_facts_matched": 0,
-                        "forbidden_matches": [],
-                        "critical_flags": [],
-                        "critical_checks_inconclusive": False,
-                        "inconclusive_critical_checks": [],
-                        "requires_manual_review": True,
-                    }
+                    raise RunTechnicalError(
+                        f"Техническая ошибка алгоритмического валидатора: {exc}", kind="integration"
+                    ) from exc
+                if _is_cancelled(run_id):
+                    return
                 evaluation_raw = await judge.evaluate(
                     model=model,
                     system=JUDGE_SYSTEM,
                     user=judge_payload(
                         case, response.text, citations=response.citations, tool_calls=response.tool_calls
                     ),
+                    should_cancel=lambda: _is_cancelled(run_id),
                 )
                 evaluation = normalize_evaluation(evaluation_raw)
                 evaluation, final_status = combine_evaluations(evaluation, algorithmic_evaluation)
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
+                    if row is None:
+                        return
                     row.auto_evaluation = evaluation
                     row.auto_status = final_status
                     row.evaluated_at = _now()
                     row.state = "completed"
                     db.commit()
             except Exception as exc:
+                if getattr(exc, "kind", None) == "cancelled":
+                    return
                 previous_id = None
                 with SessionLocal() as db:
                     row = db.get(Result, result_id)
+                    if row is None:
+                        return
                     row.state = "error"
                     row.technical_error = str(exc)[:4000]
+                    row.technical_error_kind = getattr(exc, "kind", "integration")
 
-                    # Always set deterministic status - never None
                     if algorithmic_evaluation is not None and algorithmic_evaluation.get("status") == "CRITICAL":
                         row.auto_status = "CRITICAL"
                     else:
-                        # Default to FAIL for technical errors
-                        row.auto_status = "FAIL"
+                        row.auto_status = None
 
                     row.auto_evaluation = {
-                        "status": row.auto_status,
                         "reason": "Техническая ошибка при вызове агента или LLM-судьи",
                         "critical_flags": [],
                         "technical_error": True,
+                        "technical_error_kind": row.technical_error_kind,
+                        "technical_diagnostics": getattr(exc, "diagnostics", {}),
                     }
                     if algorithmic_evaluation is not None:
                         row.auto_evaluation["algorithmic"] = algorithmic_evaluation
@@ -220,3 +242,10 @@ def start_run(run_id: int) -> None:
     if run_id in RUN_TASKS:
         return
     RUN_TASKS[run_id] = asyncio.create_task(execute_run(run_id))
+
+
+async def shutdown_runs() -> None:
+    tasks = list(RUN_TASKS.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)

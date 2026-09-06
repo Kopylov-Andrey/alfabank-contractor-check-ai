@@ -1,5 +1,11 @@
 # Agent Regression Lab
 
+Обновление 6 сентября: светлый интерфейс, история и сравнение, безопасная
+остановка/удаление, промпт **судьи** judge-v2.0 и строгий JSON-контракт.
+Основной агент не изменён.
+[Отчёт об изменениях и миграция](CHANGE_REPORT.md) ·
+[Контракт судьи и план проверки](JUDGE.md).
+
 Публичный dashboard для воспроизводимой проверки `contractor-check-agent`:
 
 - 40 основных сценариев;
@@ -25,7 +31,7 @@ flowchart LR
     API --> DB[(PostgreSQL)]
 ```
 
-Просмотр результатов публичный. Запуск прогонов, остановка и ручное изменение
+Просмотр результатов публичный. Запуск прогонов, остановка, удаление и ручное изменение
 оценки требуют `ADMIN_TOKEN`. API-ключи никогда не передаются в браузер.
 
 ## Быстрый запуск
@@ -47,11 +53,13 @@ cp .env.example .env            # Windows: copy .env.example .env
 Затем:
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.main:app --env-file .env --workers 1
 ```
 
 Сайт откроется на `http://localhost:8000`. Без `DATABASE_URL` используется
-локальный `regression.db`.
+локальный `regression.db`. Перед первым обновлением остановите прежний backend
+и сохраните копию БД: при старте добавляется nullable provenance и фиксируются
+прерванные задания. Подробности — в CHANGE_REPORT.md.
 
 ## Как устроен полный прогон
 
@@ -100,12 +108,14 @@ LLM-статус остаётся основным. Только алгорит�
 Endpoint: `GET /api/runs/{run_id}/export/csv`
 
 Скачивает CSV-файл со всеми результатами прогона:
-- Все 22 колонки: case_id, category, question, answer, статусы (LLM/алгоритм/combined), метрики оценки
+- Исходные колонки и дополнительные: идентификация/версии/неполнота прогона,
+  case_id, attempt, question, answer, отдельные статусы LLM/алгоритм/combined/manual/effective
 - Алгоритмические детали: требуемые факты, запрещённые утверждения, критические флаги
 - Готов для импорта в Excel, pandas, Google Sheets
 - Кодировка UTF-8 с BOM для корректного открытия в Excel
 
-**UI:** Кнопка "CSV ⬇" в header (видна когда есть результаты)
+**UI:** «Действия → Скачать CSV» у открытого прогона; CSV также доступен в истории.
+Текстовые значения защищены от spreadsheet formula injection.
 
 ### PDF-отчёт (HTML для печати)
 
@@ -119,7 +129,7 @@ Endpoint: `GET /api/runs/{run_id}/export/pdf`
 - Performance: latency (mean/median/p95/max)
 - Стилизован для печати в PDF через браузер (Ctrl+P → Сохранить как PDF)
 
-**UI:** Кнопка "PDF ⬇" в header (видна когда есть результаты)
+**UI:** «Действия → Отчёт / Печать в PDF». Возвращается HTML, не готовый PDF.
 
 **Примечание:** HTML-формат выбран для гибкости — можно открыть в браузере и сохранить
 как PDF встроенными средствами, либо использовать headless Chrome/Playwright для
@@ -132,6 +142,8 @@ Endpoint: `GET /api/runs/{run_id}/export/pdf`
 3. Укажите его как `DATABASE_URL` в формате `postgresql://...`.
 
 Приложение автоматически создаст таблицы `runs` и `results` при старте.
+Один worker удерживает session advisory lock; используйте прямое/session
+соединение PostgreSQL, не transaction-mode pooler.
 
 ## Бесплатный деплой на Koyeb
 
@@ -153,13 +165,15 @@ Endpoint: `GET /api/runs/{run_id}/export/pdf`
 pytest -q
 node --check app/static/app.js
 python -m compileall -q app
+node tests/browser-smoke.mjs
 ```
 
 ## Ограничения первого релиза
 
-- Для реального запуска нужно уточнить точный OpenAI-compatible URL KAILA и
-  идентификаторы доступных моделей.
+- Реальные CAILA/Yandex и калибровка judge-v2.0 требуют отдельной проверки.
 - Фоновый runner рассчитан на один backend worker. Для нескольких worker или
-  долгого production-процесса нужен отдельный job queue.
+  долгого production-процесса нужен отдельный job queue. Второй обновлённый
+  worker отклоняется до восстановления задач; interrupted-прогоны не
+  возобновляют платные запросы автоматически.
 - Оценка LLM-судьи не считается абсолютной истиной: ручная корректировка и
   комментарий сохраняются отдельно, не уничтожая исходную оценку.

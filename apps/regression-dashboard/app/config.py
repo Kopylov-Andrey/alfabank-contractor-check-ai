@@ -21,9 +21,13 @@ class Settings:
         "https://db81uub1t2h5sr9vjs0u.fi4781wp.mcpgw.serverless.yandexcloud.net",
     )
     judge_api_key: str = os.getenv("JUDGE_API_KEY", "")
-    judge_base_url: str = os.getenv("JUDGE_BASE_URL", "").rstrip("/")
-    judge_models: tuple[str, ...] = _csv("JUDGE_MODELS", "gpt-4.1-mini")
-    default_judge_model: str = os.getenv("DEFAULT_JUDGE_MODEL", "gpt-4.1-mini")
+    judge_base_url: str = os.getenv("JUDGE_BASE_URL", "https://caila.io/api/adapters/openai").rstrip("/")
+    # Only verified working models - customize in .env based on your CAILA pricing plan
+    judge_models: tuple[str, ...] = _csv(
+        "JUDGE_MODELS",
+        "gpt-5.6-luna,gpt-5.6-terra,gpt-5.6-sol"
+    )
+    default_judge_model: str = os.getenv("DEFAULT_JUDGE_MODEL", "gpt-5.6-luna")
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./regression.db").replace(
         "postgres://", "postgresql+psycopg://", 1
     )

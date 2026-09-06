@@ -4,6 +4,7 @@
 __pycache__/
 *.py[cod]
 *.db
+*.worker.lock
 .pytest_cache/
 .coverage
 htmlcov/

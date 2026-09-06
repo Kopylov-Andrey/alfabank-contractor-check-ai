@@ -2,268 +2,140 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
-from typing import Any
+import json
+from html import escape
 
-from .database import Result, Run
-from .metrics import calculate_metrics
+from .database import Run
+from .metrics import execution_summary, gate_explanation, is_technical_error, run_metrics
+from .provenance import public_provenance
+
+
+def _json(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _safe_cell(value):
+    if isinstance(value, str):
+        index = 0
+        while index < len(value) and (value[index].isspace() or ord(value[index]) < 32 or value[index] == "\ufeff"):
+            index += 1
+        candidate = value[index:]
+        if candidate.startswith(("=", "+", "-", "@")) or value.startswith(("\t", "\r", "\n")):
+            return "'" + value
+    return value
+
+
+def _export_rows(run):
+    provenance, execution = public_provenance(run), execution_summary(run.results)
+    incomplete = gate_explanation(run)["preliminary"]
+    for row in run.results:
+        evaluation = row.auto_evaluation or {}
+        algorithmic = evaluation.get("algorithmic") or {}
+        llm = evaluation.get("status") or (row.auto_status if not algorithmic else "")
+        yield {
+            "run_id": run.id, "run_name": run.name, "run_status": run.status,
+            "cancel_requested": run.cancel_requested, "run_error": run.error or "",
+            "run_created_at": str(run.created_at or ""), "run_finished_at": str(run.finished_at or ""),
+            "processed": execution["processed"], "total": execution["total"],
+            "evaluated": execution["evaluated"], "incomplete": incomplete,
+            "judge_model": run.judge_model, "prompt_version": run.prompt_version or "Версия неизвестна",
+            "prompt_source": provenance["prompt_source"], "agent_prompt_verified": provenance["agent_prompt_verified"],
+            "evaluator_sha256": provenance.get("evaluator_sha256") or "Версия неизвестна",
+            "suite_sha256": provenance.get("suite_sha256") or "Версия неизвестна",
+            "metrics_version": provenance["metrics_version"], "provenance": _json(provenance),
+            "case_id": row.case_id, "base_case_id": row.base_case_id, "attempt": row.attempt,
+            "state": row.state, "category": row.category, "company_code": row.company_code,
+            "question": row.question, "answer": row.answer or "", "expected": row.expected,
+            "evidence": row.evidence, "forbidden": row.forbidden, "critical_if": row.critical_if,
+            "llm_status": "" if is_technical_error(row) else llm or "",
+            "algorithmic_status": algorithmic.get("status", ""),
+            "combined_status": row.auto_status or "", "effective_status": row.effective_status or "",
+            "manual_status": row.manual_status or "", "manual_comment": row.manual_comment or "",
+            "latency_ms": row.latency_ms if row.latency_ms is not None else "",
+            "factual_correct": evaluation.get("factual_correct", ""), "useful": evaluation.get("useful", ""),
+            "false_refusal": evaluation.get("false_refusal", ""), "llm_reason": evaluation.get("reason", ""),
+            "algorithmic_reason": algorithmic.get("reason", ""),
+            "required_facts_matched": algorithmic.get("required_facts_matched", ""),
+            "required_facts_total": algorithmic.get("required_facts_total", ""),
+            "forbidden_matches": _json(algorithmic.get("forbidden_matches", [])),
+            "critical_flags": _json(algorithmic.get("critical_flags", [])),
+            "critical_checks_inconclusive": algorithmic.get("critical_checks_inconclusive", ""),
+            "requires_manual_review": algorithmic.get("requires_manual_review", ""),
+            "technical_error": row.technical_error or ("Техническая ошибка" if is_technical_error(row) else ""),
+            "technical_error_kind": getattr(row, "technical_error_kind", None) or "",
+            "citations": _json(row.citations or []), "evaluation": _json(evaluation),
+        }
 
 
 def generate_csv(run: Run) -> str:
-    """Generate CSV export of all results in a run."""
     output = io.StringIO()
-    writer = csv.writer(output)
-
-    # Header
-    writer.writerow([
-        "case_id",
-        "category",
-        "company_code",
-        "question",
-        "answer",
-        "llm_status",
-        "algorithmic_status",
-        "combined_status",
-        "manual_status",
-        "latency_ms",
-        "factual_correct",
-        "useful",
-        "false_refusal",
-        "llm_reason",
-        "algorithmic_reason",
-        "required_facts_matched",
-        "required_facts_total",
-        "forbidden_matches",
-        "critical_flags",
-        "critical_checks_inconclusive",
-        "requires_manual_review",
-        "technical_error",
-    ])
-
-    # Data rows
-    for row in run.results:
-        evaluation = row.auto_evaluation or {}
-        algorithmic = evaluation.get("algorithmic", {})
-
-        llm_status = evaluation.get("status", "")
-        if not llm_status and not algorithmic:
-            llm_status = row.auto_status or ""
-
-        algorithmic_status = algorithmic.get("status", "")
-
-        writer.writerow([
-            row.case_id,
-            row.category,
-            row.company_code,
-            row.question,
-            row.answer or "",
-            llm_status,
-            algorithmic_status,
-            row.effective_status or "",
-            row.manual_status or "",
-            row.latency_ms or "",
-            evaluation.get("factual_correct", ""),
-            evaluation.get("useful", ""),
-            evaluation.get("false_refusal", ""),
-            evaluation.get("reason", ""),
-            algorithmic.get("reason", ""),
-            algorithmic.get("required_facts_matched", ""),
-            algorithmic.get("required_facts_total", ""),
-            "; ".join(algorithmic.get("forbidden_matches", [])),
-            "; ".join(algorithmic.get("critical_flags", [])),
-            algorithmic.get("critical_checks_inconclusive", ""),
-            algorithmic.get("requires_manual_review", ""),
-            row.technical_error or "",
-        ])
-
+    output.write("\ufeff")
+    rows = list(_export_rows(run)) or [{"run_id": run.id, "run_name": run.name, "run_status": run.status,
+                                      "prompt_version": run.prompt_version or "Версия неизвестна",
+                                      "provenance": _json(public_provenance(run))}]
+    writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _safe_cell(value) for key, value in row.items()})
     return output.getvalue()
 
 
 def generate_html_report(run: Run) -> str:
-    """Generate HTML report for PDF conversion."""
-    metrics = calculate_metrics(run.results)
+    metrics, execution, provenance = run_metrics(run), execution_summary(run.results), public_provenance(run)
+    gate = gate_explanation(run, metrics)
+    esc = lambda value: escape(str(value if value is not None else "Нет данных"))
 
-    # Status colors
-    status_colors = {
-        "PASS": "#4ee28a",
-        "PARTIAL": "#ffbd59",
-        "FAIL": "#ff6c62",
-        "CRITICAL": "#ff3459",
-        "UNREVIEWED": "#64748b",
-    }
+    def metric_row(label, value):
+        return f"<tr><th>{esc(label)}</th><td>{esc(value)}</td></tr>"
 
-    def status_badge(status: str) -> str:
-        color = status_colors.get(status, "#64748b")
-        return f'<span style="display:inline-block;padding:4px 8px;border-radius:6px;background:{color}22;color:{color};font-size:10px;font-weight:800;border:1px solid {color}44">{status}</span>'
+    def fraction(value):
+        percentage = "Нет данных" if value.get("percent") is None else f"{value['percent']}%"
+        return f"{percentage} · {value['value']}/{value['total']}"
 
-    def metric_row(label: str, value: Any, total: Any = None, passed: bool | None = None) -> str:
-        value_str = f"{value}/{total}" if total is not None else str(value)
-        status_icon = "✓" if passed is True else "✗" if passed is False else "—"
-        status_color = "#4ee28a" if passed is True else "#ff6c62" if passed is False else "#64748b"
-        return f"""
-        <tr>
-            <td style="padding:8px;border-bottom:1px solid #1e293b">{label}</td>
-            <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;font-weight:700">{value_str}</td>
-            <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:center;color:{status_color};font-weight:800">{status_icon}</td>
-        </tr>
-        """
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    html = f"""
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <title>Regression Report — {run.name}</title>
-    <style>
-        @page {{ size: A4; margin: 1.5cm; }}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0f1a; color: #e2e8f0; font-size: 11px; line-height: 1.5; }}
-        .container {{ max-width: 800px; margin: 0 auto; padding: 20px; }}
-        h1 {{ font-size: 24px; margin-bottom: 8px; color: #fff; }}
-        h2 {{ font-size: 18px; margin: 24px 0 12px; color: #fff; border-bottom: 2px solid #1e293b; padding-bottom: 6px; }}
-        h3 {{ font-size: 14px; margin: 16px 0 8px; color: #cbd5e1; }}
-        .header {{ margin-bottom: 32px; padding-bottom: 16px; border-bottom: 2px solid #1e293b; }}
-        .meta {{ color: #64748b; font-size: 10px; margin-top: 4px; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 12px 0; background: #0e1722; border-radius: 8px; overflow: hidden; }}
-        th {{ background: #1e293b; padding: 10px 8px; text-align: left; font-weight: 800; font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }}
-        td {{ padding: 8px; border-bottom: 1px solid #1e293b; }}
-        .status-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }}
-        .status-card {{ background: #0e1722; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; }}
-        .status-card strong {{ display: block; font-size: 28px; margin: 8px 0; }}
-        .status-card small {{ color: #64748b; font-size: 9px; }}
-        .gate-status {{ display: inline-block; padding: 8px 16px; border-radius: 8px; font-weight: 800; font-size: 14px; margin: 8px 0; }}
-        .gate-pass {{ background: #4ee28a22; color: #4ee28a; border: 1px solid #4ee28a44; }}
-        .gate-fail {{ background: #ff6c6222; color: #ff6c62; border: 1px solid #ff6c6244; }}
-        .gate-pending {{ background: #64748b22; color: #64748b; border: 1px solid #64748b44; }}
-        .footer {{ margin-top: 32px; padding-top: 16px; border-top: 1px solid #1e293b; color: #64748b; font-size: 9px; text-align: center; }}
-    </style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1>Regression Report</h1>
-        <div class="meta">{run.name} · {run.judge_model} · Scope: {run.scope}</div>
-        <div class="meta">Generated: {now}</div>
-    </div>
-
-    <h2>Release Gate</h2>
-    <div class="gate-status gate-{metrics['release_gate'].lower()}">{metrics['release_gate']}</div>
-    <div class="meta">Progress: {metrics['progress']['completed']}/{metrics['progress']['total']} ({metrics['progress']['percent'] or 0}%)</div>
-
-    <div class="status-grid">
-        <div class="status-card">
-            <small>Main GTSR</small>
-            <strong>{metrics['gtsr']['value']}</strong>
-            <small>/ 40 (≥34 required)</small>
-        </div>
-        <div class="status-card">
-            <small>LLM Critical</small>
-            <strong>{metrics['critical']['value']}</strong>
-            <small>must be 0</small>
-        </div>
-        <div class="status-card">
-            <small>Combined Critical</small>
-            <strong>{metrics['combined']['critical']['value']}</strong>
-            <small>must be 0</small>
-        </div>
-    </div>
-
-    <h2>Quality Metrics</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Metric</th>
-                <th style="text-align:right">Value</th>
-                <th style="text-align:center">Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {metric_row("Factual Correctness", f"{metrics['factual_correctness']['percent'] or 0:.1f}%", None, metrics['factual_correctness']['pass'])}
-            {metric_row("Completeness", f"{metrics['completeness']['percent'] or 0:.1f}%", None, metrics['completeness']['pass'])}
-            {metric_row("Source Coverage", f"{metrics['source_coverage']['percent'] or 0:.1f}%", None, metrics['source_coverage']['pass'])}
-            {metric_row("Usefulness", f"{metrics['usefulness']['percent'] or 0:.1f}%", None, metrics['usefulness']['pass'])}
-            {metric_row("False Refusals", metrics['false_refusals']['value'], metrics['false_refusals']['total'], metrics['false_refusals']['pass'])}
-            {metric_row("Stable Boundary", metrics['stable_boundary']['value'], metrics['stable_boundary']['total'], metrics['stable_boundary']['pass'])}
-            {metric_row("Web Labeling", metrics['web_labeling']['value'], metrics['web_labeling']['total'], metrics['web_labeling']['pass'])}
-        </tbody>
-    </table>
-
-    <h2>Status Distribution</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>LLM Status</th>
-                <th style="text-align:right">Count</th>
-                <th>Algorithmic Status</th>
-                <th style="text-align:right">Count</th>
-            </tr>
-        </thead>
-        <tbody>
-"""
-
-    llm_statuses = ["PASS", "PARTIAL", "FAIL", "CRITICAL", "UNREVIEWED"]
-    alg_statuses = metrics['algorithmic']['statuses']
-
-    for i, status in enumerate(llm_statuses):
-        llm_count = metrics['statuses'].get(status, 0)
-        alg_status = ["PASS", "PARTIAL", "FAIL", "CRITICAL"][i] if i < 4 else ""
-        alg_count = alg_statuses.get(alg_status, 0) if alg_status else ""
-        html += f"""
-            <tr>
-                <td style="padding:8px;border-bottom:1px solid #1e293b">{status_badge(status)}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;font-weight:700">{llm_count}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b">{status_badge(alg_status) if alg_status else ''}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;font-weight:700">{alg_count}</td>
-            </tr>
-"""
-
-    html += """
-        </tbody>
-    </table>
-
-    <h2>Algorithmic Validation</h2>
-    <table>
-        <tbody>
-"""
-
-    alg = metrics['algorithmic']
-    html += metric_row("Evaluated Cases", alg['evaluated'], alg['total'], None)
-    html += metric_row("Required Facts Coverage", f"{alg['required_fact_coverage']['percent'] or 0:.1f}%", None, None)
-    html += metric_row("Forbidden Matches", alg['forbidden_matches']['value'], f"in {alg['forbidden_matches']['cases']} cases", None)
-    html += metric_row("Algorithmic CRITICAL", alg['critical']['value'], alg['critical']['total'], alg['critical']['value'] == 0)
-    html += metric_row("Requires Manual Review", alg['manual_review']['value'], alg['manual_review']['total'], None)
-
-    html += f"""
-        </tbody>
-    </table>
-
-    <h2>Performance</h2>
-    <table>
-        <tbody>
-            {metric_row("Mean Latency", f"{metrics['latency']['mean_ms'] or 0:.0f} ms", None, None)}
-            {metric_row("Median Latency", f"{metrics['latency']['median_ms'] or 0:.0f} ms", None, None)}
-            {metric_row("p95 Latency", f"{metrics['latency']['p95_ms'] or 0:.0f} ms", None, None)}
-            {metric_row("Max Latency", f"{metrics['latency']['max_ms'] or 0:.0f} ms", None, None)}
-        </tbody>
-    </table>
-
-    <h2>Technical Summary</h2>
-    <table>
-        <tbody>
-            {metric_row("Completed", metrics['technical']['completed'], metrics['progress']['total'], None)}
-            {metric_row("Errors", metrics['technical']['errors'], None, metrics['technical']['errors'] == 0)}
-        </tbody>
-    </table>
-
-    <div class="footer">
-        Agent Regression Lab · Контрагент по фактам<br>
-        Report generated: {now}
-    </div>
-</div>
-</body>
-</html>
-"""
-
-    return html
+    quality = "".join(metric_row(label, fraction(metrics[key])) for key, label in [
+        ("gtsr", "GTSR · ≥34/40"), ("factual_correctness", "Факты · ≥29 ответов"),
+        ("completeness", "Полнота · ≥90%"), ("source_coverage", "Источники · ≥95%"),
+        ("usefulness", "Полезность · ≥26 ответов"), ("false_refusals", "Ложные отказы · ≤3"),
+        ("stable_boundary", "Устойчивость · ≥7/8"), ("web_labeling", "Маркировка Web · 100%")])
+    details = []
+    for row in _export_rows(run):
+        parts = [f"<article><h3>{esc(row['case_id'])} · повтор {row['attempt']}</h3>"]
+        for label, key in [
+            ("Вопрос", "question"), ("Ответ агента", "answer"), ("LLM", "llm_status"),
+            ("Алгоритм", "algorithmic_status"), ("Combined", "combined_status"),
+            ("Ручная оценка", "manual_status"), ("Итог", "effective_status"),
+            ("Состояние", "state"), ("Техническая ошибка", "technical_error"),
+            ("Причина LLM", "llm_reason"), ("Причина алгоритма", "algorithmic_reason"),
+            ("Требуется ручная проверка", "requires_manual_review"),
+            ("Критическая проверка не определена", "critical_checks_inconclusive"),
+            ("Критические флаги", "critical_flags"), ("Комментарий", "manual_comment"),
+            ("Ожидаемое поведение", "expected"), ("Основания", "evidence"),
+            ("Источники", "citations"), ("Полная оценка", "evaluation")]:
+            parts.append(f"<h4>{label}</h4><pre>{esc(row[key])}</pre>")
+        details.append("".join(parts) + "</article>")
+    legacy = "Исторический расчёт legacy-v1 сохранён: технические ошибки с ответом могли входить в quality-метрики." if provenance["metrics_version"] == "legacy-v1" else "quality-v2: технические ошибки исключены из качества; покрытие показано отдельно."
+    return f"""<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Regression Report · #{run.id} · {esc(run.name)}</title>
+<style>
+@page {{size:A4;margin:15mm}} * {{box-sizing:border-box}} body {{font:14px/1.55 Arial,sans-serif;color:#202124;background:white;margin:0 auto;padding:28px;max-width:1000px}}
+h1 {{font-size:26px}} h2 {{font-size:20px;border-bottom:2px solid #d92332;padding-bottom:8px;margin-top:28px}} h3 {{font-size:17px}}
+p,pre,td {{overflow-wrap:anywhere}} pre {{white-space:pre-wrap;font:inherit;background:#f5f5f6;padding:12px}} table {{width:100%;border-collapse:collapse}}
+th,td {{text-align:left;border-bottom:1px solid #ddd;padding:8px}} th {{font-weight:600}} article {{border-top:1px solid #aaa;margin-top:24px;padding-top:12px}}
+.notice {{background:#fff4df;padding:14px}} .meta {{color:#54565b}} @media print {{body {{padding:0}} h2,h3,h4 {{break-after:avoid}} tr {{break-inside:avoid}}}}
+</style></head><body>
+<h1>Regression Report · #{run.id}</h1><p>{esc(run.name)}</p>
+<p>Статус: {esc(run.status)} · Остановка запрошена: {esc(run.cancel_requested)} · Судья: {esc(run.judge_model)} · Набор: {esc(run.scope)}</p>
+<p>Создан: {esc(run.created_at)} · Завершён: {esc(run.finished_at)}</p><p>{esc(run.error or '')}</p>
+<p>Промпт: {esc(run.prompt_version or 'Версия неизвестна')} · Источник: {esc(provenance['prompt_source'])}. Установка на внешнем агенте не подтверждена.</p>
+<h2>Release Gate</h2><p><b>{esc(metrics['release_gate'])}</b> · {'Предварительно; итоговая оценка недоступна' if gate['preliminary'] else 'Полный результат'}</p>
+<ul>{''.join(f'<li>{esc(reason)}</li>' for reason in gate['reasons'])}</ul>
+<p>Обработано {execution['processed']}/{execution['total']}; оценено {execution['evaluated']}/{execution['total']}; технических ошибок {execution['errors']}; без оценки {execution['unscored']}.</p>
+<p class="notice">{esc(legacy)} GTSR: фиксированный знаменатель 40. LLM-метрики учитывают ручной статус по существующей политике.</p>
+<h2>Quality Metrics</h2><table>{quality}</table>
+<h2>Status Distribution</h2><table>{metric_row('LLM + ручная оценка', _json(metrics['statuses']))}{metric_row('Combined + ручная оценка', _json(metrics['combined']['statuses']))}</table>
+<h2>Algorithmic Validation</h2><table>{metric_row('Алгоритмические статусы', _json(metrics['algorithmic']['statuses']))}{metric_row('Покрытие обязательных фактов', fraction(metrics['algorithmic']['required_fact_coverage']))}{metric_row('Алгоритмические CRITICAL, включая сохранённые при сбое судьи', execution['algorithmic_critical'])}{metric_row('Review flags / требуют проверки', f"{execution['review_flags']} / {execution['review_pending']}")}</table>
+<h2>Скорость ответа</h2><table>{''.join(metric_row(label, f'{value} мс' if value is not None else 'Нет данных') for label, value in metrics['latency'].items())}</table>
+<h2>Происхождение данных</h2><pre>{esc(_json(provenance))}</pre>
+<h2>Результаты</h2>{''.join(details) or '<p>Нет результатов</p>'}
+<p class="meta">Regression Lab · Хакатонный проект, не официальный банковский сервис. Отчёт / Печать в PDF: откройте HTML в браузере и выберите печать.</p>
+</body></html>"""

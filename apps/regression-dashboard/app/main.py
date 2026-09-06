@@ -2,31 +2,36 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from .cases import build_suite, public_cases
 from .config import settings
 from .database import Result, Run, get_db, init_db
 from .export import generate_csv, generate_html_report
-from .metrics import calculate_metrics
-from .runner import start_run
-
-
-ACTIVE_RUN_STATUSES = {"queued", "running"}
-DELETABLE_RUN_STATUSES = {"completed", "failed", "cancelled", "draft"}
+from .metrics import execution_summary, gate_explanation, run_metrics
+from .lifecycle import ACTIVE as ACTIVE_RUN_STATUSES, DELETABLE as DELETABLE_RUN_STATUSES, recover_interrupted_runs, worker_guard
+from .provenance import capture_provenance, public_provenance
+from .runner import RUN_TASKS, case_from_row, shutdown_runs, start_run
+from .judge_models import public_profiles
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
-    yield
+    with worker_guard():
+        init_db()
+        recover_interrupted_runs()
+        try:
+            yield
+        finally:
+            await shutdown_runs()
 
 
 app = FastAPI(title="Agent Regression Lab", version="1.0.0", lifespan=lifespan)
@@ -36,7 +41,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class RunCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    prompt_version: str = Field(default="current", max_length=120)
+    prompt_version: str = Field(default="", max_length=120)
     judge_model: str
     scope: str = Field(default="full", pattern="^(full|main|boundary)$")
 
@@ -44,6 +49,7 @@ class RunCreate(BaseModel):
 class ReviewUpdate(BaseModel):
     manual_status: str | None = Field(default=None, pattern="^(PASS|PARTIAL|FAIL|CRITICAL)$")
     manual_comment: str | None = Field(default=None, max_length=4000)
+
 
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
@@ -80,6 +86,7 @@ def serialize_result(row: Result, include_raw: bool = False) -> dict:
         "citations": row.citations,
         "tool_calls": row.tool_calls,
         "technical_error": row.technical_error,
+        "technical_error_kind": row.technical_error_kind,
         "auto_status": row.auto_status,
         "effective_status": row.effective_status,
         "auto_evaluation": row.auto_evaluation,
@@ -92,6 +99,7 @@ def serialize_result(row: Result, include_raw: bool = False) -> dict:
 
 
 def serialize_run(run: Run, include_results: bool = False, include_raw: bool = False) -> dict:
+    metrics = run_metrics(run)
     payload = {
         "id": run.id,
         "name": run.name,
@@ -104,7 +112,12 @@ def serialize_run(run: Run, include_results: bool = False, include_raw: bool = F
         "finished_at": run.finished_at,
         "error": run.error,
         "cancel_requested": run.cancel_requested,
-        "metrics": calculate_metrics(run.results),
+        "metrics": metrics,
+        "execution": execution_summary(run.results),
+        "gate": gate_explanation(run, metrics),
+        "provenance": public_provenance(run),
+        "can_delete": run.status in DELETABLE_RUN_STATUSES and run.id not in RUN_TASKS,
+        "can_stop": run.status in ACTIVE_RUN_STATUSES and not run.cancel_requested,
     }
     if include_results:
         payload["results"] = [serialize_result(row, include_raw=include_raw) for row in run.results]
@@ -130,6 +143,7 @@ def health() -> dict:
 def config() -> dict:
     return {
         "judge_models": settings.judge_models,
+        "judge_profiles": public_profiles(settings.judge_models),
         "default_judge_model": settings.default_judge_model,
         "scopes": ["full", "main", "boundary"],
         "public_read": True,
@@ -137,25 +151,54 @@ def config() -> dict:
     }
 
 
+
 @app.get("/api/cases")
 def cases() -> dict:
     return public_cases()
 
 
+@app.get("/api/compare")
+def compare(baseline: int, candidate: int, db: Session = Depends(get_db)) -> dict:
+    from .comparison import compare_runs
+    if baseline == candidate:
+        raise HTTPException(400, "Выберите два разных прогона")
+    a, b = db.get(Run, baseline), db.get(Run, candidate)
+    if not a or not b:
+        raise HTTPException(404, "Один из прогонов не найден")
+    try:
+        return compare_runs(a, b)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.get("/api/runs")
-def list_runs(db: Session = Depends(get_db)) -> list[dict]:
-    runs = db.scalars(select(Run).order_by(Run.created_at.desc()).limit(100)).all()
+def list_runs(db: Session = Depends(get_db), q: str = "", status: str = "",
+              sort: str = Query("desc", pattern="^(asc|desc)$"),
+              offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200)) -> list[dict]:
+    query = select(Run)
+    if q:
+        from sqlalchemy import String, cast, or_
+        query = query.where(or_(Run.name.icontains(q, autoescape=True), cast(Run.id, String) == q))
+    if status == "cancelling":
+        query = query.where(Run.status.in_(ACTIVE_RUN_STATUSES), Run.cancel_requested.is_(True))
+    elif status:
+        query = query.where(Run.status == status)
+    order = Run.created_at.asc() if sort == "asc" else Run.created_at.desc()
+    runs = db.scalars(query.order_by(order, Run.id.asc() if sort == "asc" else Run.id.desc()).offset(offset).limit(limit)).all()
     return [serialize_run(run) for run in runs]
 
 
 @app.post("/api/runs", dependencies=[Depends(require_admin)])
-def create_run(payload: RunCreate, db: Session = Depends(get_db)) -> dict:
+async def create_run(payload: RunCreate, db: Session = Depends(get_db)) -> dict:
     if payload.judge_model not in settings.judge_models:
         raise HTTPException(400, "Недоступная модель судьи")
     suite = build_suite(payload.scope)
+    if not payload.name.strip():
+        raise HTTPException(422, "Название не должно быть пустым")
     run = Run(
         name=payload.name.strip(),
-        prompt_version=payload.prompt_version.strip() or "current",
+        prompt_version=payload.prompt_version.strip(),
+        provenance=capture_provenance(suite, payload.prompt_version.strip(), payload.judge_model),
         judge_model=payload.judge_model,
         scope=payload.scope,
     )
@@ -193,17 +236,30 @@ async def launch_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Прогон не найден")
-    if run.status not in {"draft", "failed", "cancelled"}:
-        raise HTTPException(409, "Этот прогон уже запущен или завершён")
-    run.cancel_requested = False
-    run.status = "queued"
+    if run.status != "draft":
+        raise HTTPException(409, "Запускается только draft. Для повторной проверки создайте новый прогон; история сохраняется.")
+    if run_id in RUN_TASKS:
+        raise HTTPException(409, "Worker ещё выполняет прогон")
+    changed = db.execute(update(Run).where(Run.id == run_id, Run.status == "draft")
+                         .values(status="queued", cancel_requested=False,
+                                 provenance=capture_provenance([case_from_row(row) for row in run.results], run.prompt_version, run.judge_model)))
+    if not changed.rowcount:
+        db.rollback()
+        raise HTTPException(409, "Запускается только draft. Для повторной проверки создайте новый прогон; история сохраняется.")
     db.commit()
-    start_run(run.id)
+    try:
+        start_run(run.id)
+    except Exception:
+        db.execute(update(Run).where(Run.id == run_id, Run.status == "queued")
+                   .values(status="failed", error="Не удалось создать фоновую задачу",
+                           finished_at=datetime.now(timezone.utc)))
+        db.commit()
+        raise HTTPException(503, "Не удалось создать фоновую задачу")
     return {"status": "queued", "run_id": run.id}
 
 
 @app.post("/api/runs/{run_id}/cancel", dependencies=[Depends(require_admin)])
-def cancel_run(run_id: int, db: Session = Depends(get_db)) -> dict:
+async def cancel_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Прогон не найден")
@@ -241,16 +297,24 @@ def cancel_run(run_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @app.delete("/api/runs/{run_id}", dependencies=[Depends(require_admin)])
-def delete_run(run_id: int, db: Session = Depends(get_db)) -> dict:
+async def delete_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Прогон не найден")
-    if run.status in ACTIVE_RUN_STATUSES:
+    if run.status in ACTIVE_RUN_STATUSES or run_id in RUN_TASKS:
         raise HTTPException(409, "Сначала остановите прогон и дождитесь статуса cancelled")
     if run.status not in DELETABLE_RUN_STATUSES:
         raise HTTPException(409, f"Прогон в статусе {run.status} удалить нельзя")
     deleted = {"status": "deleted", "run_id": run.id, "name": run.name}
-    db.delete(run)
+    # A conditional write takes the database row/write lock before child deletion.
+    # A concurrent launch can only win before this statement, never between deletes.
+    changed = db.execute(update(Run).where(Run.id == run_id, Run.status.in_(DELETABLE_RUN_STATUSES))
+                         .values(status="deleting"))
+    if not changed.rowcount:
+        db.rollback()
+        raise HTTPException(409, "Состояние прогона изменилось; обновите список")
+    db.execute(delete(Result).where(Result.run_id == run_id))
+    db.execute(delete(Run).where(Run.id == run_id))
     db.commit()
     return deleted
 
@@ -309,7 +373,7 @@ def export_pdf(run_id: int, db: Session = Depends(get_db)) -> Response:
 
 
 @app.patch("/api/results/{result_id}", dependencies=[Depends(require_admin)])
-def review_result(result_id: int, payload: ReviewUpdate, db: Session = Depends(get_db)) -> dict:
+async def review_result(result_id: int, payload: ReviewUpdate, db: Session = Depends(get_db)) -> dict:
     row = db.get(Result, result_id)
     if not row:
         raise HTTPException(404, "Результат не найден")

@@ -37,10 +37,12 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return round(ordered[index], 1)
 
 
-def calculate_metrics(results: Iterable[Result]) -> dict:
+def calculate_metrics(results: Iterable[Result], *, version: str = "legacy-v1") -> dict:
     all_rows = list(results)
     rows = [row for row in all_rows if row.state in {"completed", "error"}]
     scored = [row for row in rows if row.answer is not None]
+    if version == "quality-v2":
+        scored = [row for row in scored if row.state == "completed" and not is_technical_error(row)]
     main = [row for row in scored if row.is_main and row.attempt == 1]
     answerable = [row for row in main if row.answerability == "yes"]
     web = [row for row in scored if row.is_web]
@@ -165,4 +167,62 @@ def calculate_metrics(results: Iterable[Result]) -> dict:
     gates.append(metrics["combined"]["critical"]["pass"])
     is_full_suite = len(all_rows) == 59
     metrics["release_gate"] = "PASS" if is_full_suite and total == 59 and all(gates) else ("FAIL" if is_full_suite and total == 59 else "PENDING")
+    if version == "quality-v2":
+        if not main:
+            metrics["gtsr"]["percent"] = None
+        if not boundary:
+            metrics["stable_boundary"]["percent"] = None
     return metrics
+
+
+def is_technical_error(row) -> bool:
+    return (row.state == "error" or bool(getattr(row, "technical_error", None))
+            or (getattr(row, "auto_evaluation", None) or {}).get("technical_error") is True)
+
+
+def execution_summary(results) -> dict:
+    rows = list(results)
+    evaluated = [row for row in rows if row.state == "completed" and not is_technical_error(row)]
+    review = [row for row in rows if (row.auto_evaluation or {}).get("requires_manual_review")
+              or (row.auto_evaluation or {}).get("algorithmic", {}).get("requires_manual_review")]
+    return {
+        "total": len(rows),
+        "processed": sum(row.state in {"completed", "error"} for row in rows),
+        "evaluated": len(evaluated),
+        "errors": sum(is_technical_error(row) for row in rows),
+        "unscored": len(rows) - len(evaluated),
+        "review_flags": len(review),
+        "review_pending": sum(not row.manual_status for row in review),
+        "manual_reviews": sum(bool(row.manual_status) for row in rows),
+        "algorithmic_critical": sum((row.auto_evaluation or {}).get("algorithmic", {}).get("status") == "CRITICAL" for row in rows),
+    }
+
+
+def run_metrics(run) -> dict:
+    from .provenance import public_provenance
+    return calculate_metrics(run.results, version=public_provenance(run)["metrics_version"])
+
+
+def gate_explanation(run, metrics=None) -> dict:
+    metrics = metrics or run_metrics(run)
+    execution = execution_summary(run.results)
+    reasons = []
+    labels = {"gtsr": "GTSR: минимум 34/40", "factual_correctness": "Факты: минимум 29 ответов",
+              "completeness": "Полнота: ≥90%", "source_coverage": "Источники: ≥95%",
+              "usefulness": "Полезность: минимум 26 ответов", "false_refusals": "Ложные отказы: ≤3",
+              "stable_boundary": "Устойчивость: минимум 7/8", "web_labeling": "Маркировка Web: 100%", "critical": "LLM CRITICAL: 0"}
+    if run.status != "completed":
+        reasons.append("Прогон не завершён; итоговая оценка недоступна.")
+    if execution["total"] != 59:
+        reasons.append("Release gate требует полный набор из 59 кейсов.")
+    if execution["unscored"]:
+        reasons.append(f"Нет оценки качества для {execution['unscored']} из {execution['total']} кейсов; результат предварительный.")
+    if execution["errors"]:
+        reasons.append(f"Технические ошибки: {execution['errors']}.")
+    for key, label in labels.items():
+        if not metrics[key]["pass"]:
+            reasons.append(label)
+    if not metrics["combined"]["critical"]["pass"]:
+        reasons.append("Итоговый CRITICAL должен быть 0.")
+    return {"preliminary": run.status != "completed" or bool(execution["unscored"]) or execution["total"] != 59,
+            "reasons": reasons}
