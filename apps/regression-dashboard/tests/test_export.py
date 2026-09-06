@@ -288,3 +288,55 @@ def test_export_handles_unicode_in_run_name(api_client) -> None:
     assert "filename*=UTF-8''" in csv_response.headers["content-disposition"]
     assert "attachment" in pdf_response.headers["content-disposition"]
     assert "filename*=UTF-8''" in pdf_response.headers["content-disposition"]
+
+
+def test_csv_export_marks_incomplete_agent_response_as_technical_error(api_client) -> None:
+    client, testing_session = api_client
+    with testing_session() as db:
+        run = Run(
+            name="technical-run",
+            prompt_version="test",
+            judge_model="test-judge",
+            scope="main",
+            status="completed",
+        )
+        run.results = [
+            Result(
+                position=1,
+                case_id="A02",
+                base_case_id="A02",
+                attempt=1,
+                company_code="A",
+                dialogue_key="technical-1",
+                category="Technical",
+                question="Question",
+                expected="Expected",
+                evidence="Evidence",
+                forbidden="Forbidden",
+                critical_if="Critical",
+                answerability="yes",
+                is_main=True,
+                is_boundary=False,
+                is_web=False,
+                state="error",
+                answer=None,
+                technical_error="Незавершённый ответ агента: status='incomplete'",
+                auto_status="FAIL",
+                auto_evaluation={
+                    "status": "FAIL",
+                    "reason": "Техническая ошибка при вызове агента или LLM-судьи",
+                    "technical_error": True,
+                },
+            )
+        ]
+        db.add(run)
+        db.commit()
+        run_id = run.id
+
+    response = client.get(f"/api/runs/{run_id}/export/csv")
+    row = next(csv.DictReader(io.StringIO(response.text)))
+
+    assert response.status_code == 200
+    assert row["answer"] == ""
+    assert row["algorithmic_status"] == ""
+    assert "status='incomplete'" in row["technical_error"]
