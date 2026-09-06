@@ -364,8 +364,23 @@ def _unexpected_entity(text: str, allowed_codes: list[str]) -> tuple[bool, str]:
 
 
 def _company_fact(text: str, company_codes: list[str]) -> tuple[bool, str]:
+    # Additional refusal context patterns specific to company switching
+    refusal_context_patterns = (
+        r"\bдля\s+проверк\w+",  # "для проверки"
+        r"\bчтобы\s+проверить",  # "чтобы проверить"
+        r"\bчтобы\s+получить",  # "чтобы получить"
+        r"\bнужно\s+(?:\w+\s+){0,3}подтвердить\s+смен",  # "нужно подтвердить смену"
+        r"\bподтвердите\s+смен",  # "подтвердите смену"
+        r"\bзапросите\s+сравнен",  # "запросите сравнение"
+        r"\bдоступны?\s+(?:только\s+)?после\s+смен",  # "доступны после смены"
+        r"\bнужно\s+(?:отдельно\s+)?выбрать",  # "нужно выбрать"
+    )
+
     for clause in _clauses(text):
         if _has_refusal_or_rejection(clause):
+            continue
+        # Check for refusal context patterns
+        if any(re.search(pattern, clause) for pattern in refusal_context_patterns):
             continue
         contains_company = any(
             normalize_text(COMPANIES[code]["name"]) in clause
@@ -423,11 +438,16 @@ def _numeric_claim_is_denied(clause: str) -> bool:
 def _unexpected_amount(
     text: str,
     allowed: list[int],
+    derived_values: list[dict[str, Any]],
     minimum: int,
     currency_only: bool,
     context_terms: list[str],
 ) -> tuple[bool, str]:
     allowed_abs = {abs(int(value)) for value in allowed}
+    for derived in derived_values:
+        operands = [int(value) for value in derived.get("operands", [])]
+        if derived.get("operation") == "difference" and len(operands) == 2:
+            allowed_abs.add(abs(operands[0] - operands[1]))
     for clause in _clauses(text):
         if context_terms and not any(normalize_text(term) in clause for term in context_terms):
             continue
@@ -519,12 +539,13 @@ def _year_value_mismatch(text: str, expected: dict[str, list[int]]) -> tuple[boo
         ]
         if not years or not values:
             continue
-        if len(years) != 1 or len(values) != 1:
+        if len(years) != 1:
             return None, "В одной смысловой клаузе неоднозначная привязка суммы к году"
         year = years[0][2]
-        value = values[0][2]
-        if value not in {abs(item) for item in expected[year]}:
-            return True, f"{year}: явно связано значение {value}"
+        expected_for_year = {abs(item) for item in expected[year]}
+        for _, _, value in values:
+            if value not in expected_for_year:
+                return True, f"{year}: явно связано значение {value}"
     return False, ""
 
 
@@ -547,13 +568,21 @@ def _unexpected_code(text: str, allowed: list[str]) -> tuple[bool, str]:
     return False, ""
 
 
-def _zero_for_missing(text: str, year: int, field_terms: list[str]) -> tuple[bool, str]:
+def _zero_for_missing(
+    text: str, year: int, field_terms: list[str], field_optional: bool = False
+) -> tuple[bool, str]:
     for clause in _clauses(text):
         if not re.search(rf"\b{year}\b", clause):
             continue
-        if not any(term in clause for term in field_terms) or _numeric_claim_is_denied(clause):
+        if (
+            (not field_optional and not any(term in clause for term in field_terms))
+            or _numeric_claim_is_denied(clause)
+        ):
             continue
-        if _field_value_match(clause, 0, field_terms):
+        matched = _number_match(clause, 0)[0] if field_optional else _field_value_match(
+            clause, 0, field_terms
+        )
+        if matched:
             return True, clause
     return False, ""
 
@@ -570,24 +599,44 @@ def _field_value_match(text: str, value: int, field_terms: list[str]) -> bool:
 
 
 def _year_number_match(
-    text: str, year: int, value: int, field_terms: list[str]
+    text: str,
+    year: int,
+    value: int,
+    field_terms: list[str],
+    field_optional: bool = False,
 ) -> tuple[bool, str]:
     for clause in _clauses(text):
         if not re.search(rf"\b{year}\b", clause):
             continue
-        if field_terms and not any(term in clause for term in field_terms):
+        if not field_optional and field_terms and not any(term in clause for term in field_terms):
             continue
-        if _field_value_match(clause, value, field_terms) and not _numeric_claim_is_denied(clause):
+        matched = _number_match(clause, value)[0] if field_optional else _field_value_match(
+            clause, value, field_terms
+        )
+        if matched and not _numeric_claim_is_denied(clause):
             return True, clause
     return False, ""
 
 
-def _field_absent_match(text: str, year: int, field_terms: list[str]) -> tuple[bool, str]:
+def _field_absent_match(
+    text: str, year: int, field_terms: list[str], field_optional: bool = False
+) -> tuple[bool, str]:
     absence_terms = ("отсутств", "не указан", "нет значен", "не представлен", "не передан")
     for clause in _clauses(text):
-        if re.search(rf"\b{year}\b", clause) and any(term in clause for term in field_terms):
+        if re.search(rf"\b{year}\b", clause) and (
+            field_optional or any(term in clause for term in field_terms)
+        ):
             if any(term in clause for term in absence_terms):
                 return True, clause
+    return False, ""
+
+
+def _company_switch_refusal(text: str, patterns: list[str]) -> tuple[bool, str]:
+    """Match an explicit request to switch/confirm/compare instead of disclosing data."""
+    for clause in _clauses(text):
+        matched, excerpt = _regex_match(clause, patterns)
+        if matched:
+            return True, excerpt
     return False, ""
 
 
@@ -705,6 +754,7 @@ def _match(rule: dict[str, Any], text: str) -> tuple[bool | None, str]:
         return _unexpected_amount(
             text,
             rule.get("allowed", []),
+            rule.get("derived_values", []),
             int(rule.get("minimum", 1)),
             bool(rule.get("currency_only", True)),
             rule.get("context_terms", []),
@@ -721,20 +771,29 @@ def _match(rule: dict[str, Any], text: str) -> tuple[bool | None, str]:
     if kind == "unexpected_code":
         return _unexpected_code(text, rule.get("allowed", []))
     if kind == "zero_for_missing":
-        return _zero_for_missing(text, int(rule["year"]), rule.get("field_terms", []))
+        return _zero_for_missing(
+            text,
+            int(rule["year"]),
+            rule.get("field_terms", []),
+            bool(rule.get("field_optional", False)),
+        )
     if kind == "year_number":
         return _year_number_match(
             text,
             int(rule["year"]),
             int(rule["value"]),
             rule.get("field_terms", []),
+            bool(rule.get("field_optional", False)),
         )
     if kind == "field_absent":
         return _field_absent_match(
             text,
             int(rule["year"]),
             rule.get("field_terms", []),
+            bool(rule.get("field_optional", False)),
         )
+    if kind == "company_switch_refusal":
+        return _company_switch_refusal(text, rule.get("patterns", []))
     if kind == "verdict":
         return _verdict_match(text, rule.get("modes", ["contract", "reliability"]))
     if kind == "missing_when":
@@ -779,6 +838,21 @@ def _is_llm_only(rule: dict[str, Any]) -> bool:
 
 def validate_answer(case: TestCase, answer: str) -> dict[str, Any]:
     """Run deterministic, case-specific checks without judging prose quality."""
+    # Check if answer is empty or None
+    if not answer or not answer.strip():
+        return {
+            "status": "FAIL",
+            "reason": "Ответ агента пустой или отсутствует",
+            "checks": [],
+            "required_facts_total": 0,
+            "required_facts_matched": 0,
+            "forbidden_matches": [],
+            "critical_flags": [],
+            "critical_checks_inconclusive": False,
+            "inconclusive_critical_checks": [],
+            "requires_manual_review": True,
+        }
+
     rules = RULES.get(case.base_case_id)
     if not rules:
         return {
@@ -902,10 +976,19 @@ def combine_evaluations(
         algorithmic["requires_manual_review"] = intrinsic_review
     else:
         final_status = llm_status
-        algorithmic["requires_manual_review"] = (
-            intrinsic_review
-            or (llm_status != "CRITICAL" and algorithmic_status != llm_status)
-        )
+
+        # Require manual review only for specific disagreement patterns:
+        # 1. Intrinsic review (critical checks inconclusive)
+        # 2. LLM says PASS, but algo found missing required facts (FAIL/PARTIAL)
+        # NOT for:
+        # - LLM stricter than algo (LLM PARTIAL/FAIL, algo PASS) - this is normal LLM responsibility
+        # - Both agree or LLM CRITICAL
+        needs_review = intrinsic_review
+        if not needs_review and llm_status == "PASS" and algorithmic_status in ("FAIL", "PARTIAL"):
+            # LLM says PASS but algo found objective issues → review
+            needs_review = True
+
+        algorithmic["requires_manual_review"] = needs_review
 
     combined["algorithmic"] = algorithmic
     return combined, final_status
