@@ -28,13 +28,14 @@ The agent:
 
 ```text
 apps/
-  product-ui/              Main end-user interface
+  product-ui/              Main end-user interface deployment notes; source pending recovery
   regression-dashboard/   Automated evaluation and quality dashboard
 services/
-  mcp-functions/           Yandex Cloud Functions exposed through MCP
-prompts/                   Versioned agent system prompts
+  mcp-functions/           Imported Yandex Cloud Function source snapshots exposed through MCP
+  contractor-agent-demo-api/  Deployed demo proxy documentation; source pending import
+prompts/                   Live AI Studio configuration and versioned prompt material
 evals/                     Frozen evaluation artifacts and run results
-docs/                      Product, MVP, evaluation and engineering documents
+docs/                      Product, MVP, evaluation, engineering and deployment documents
 presentation/              Final pitch deck and demo materials
 .github/workflows/         CI and deployment verification
 ```
@@ -43,12 +44,31 @@ presentation/              Final pitch deck and demo materials
 
 | Component | Status |
 |---|---|
-| Agent in Yandex AI Studio | Implemented |
-| MCP tools | Implemented in Yandex Cloud; source code pending import |
-| Product UI | Pending import |
+| Agent in Yandex AI Studio | Implemented and deployed |
+| MCP tools | Implemented; deployed source snapshots imported |
+| Product UI | Deployed in Yandex Object Storage; original source tree not yet recovered |
+| Demo API proxy | Deployed; behavior documented, source pending import |
 | Regression dashboard | Implemented |
 | Frozen evaluation suite | 40 main + 16 repeats + 3 Web Search scenarios |
-| Production deployment | Pending configuration |
+| Public product demo | Available in Yandex Object Storage static hosting |
+
+## Deployed path
+
+```text
+Browser
+  -> contractor-check-agent-demo.website.yandexcloud.net
+  -> contractor-agent-demo-api
+  -> Yandex AI Studio saved agent contractor-check-agent
+     -> contractor-check-mcp
+        -> get-report-by-inn
+        -> search-contractors
+        -> compare-contractors
+     -> Web Search
+  -> contractor-reports Object Storage dataset
+```
+
+The inspected deployment snapshot, runtime parameters and security boundaries are documented in
+[`docs/07_deployed_architecture.md`](docs/07_deployed_architecture.md).
 
 ## Regression dashboard
 
@@ -67,6 +87,8 @@ Local setup and deployment instructions are in
 - [Frozen AI test cases](docs/04_ai_evaluation_test_cases.md)
 - [Engineering specification](docs/05_engineering_spec_mvp.md)
 - [Agent and prompt requirements](docs/06_agent_prompt_spec.md)
+- [Deployed architecture snapshot](docs/07_deployed_architecture.md)
+- [Live AI Studio configuration](prompts/agent-live-config.md)
 
 ## Team
 
@@ -79,6 +101,6 @@ Local setup and deployment instructions are in
 ## Security
 
 Do not commit API keys, database URLs, Lockbox values, service-account keys,
-raw credentials, or local `.env` files. Public access to regression results is
-read-only; runs and manual reviews require an admin token.
-
+AWS-compatible credentials, the private contractor dataset, raw credentials,
+or local `.env` files. The browser-facing UI must call the backend proxy rather
+than receive a Yandex API key directly.
