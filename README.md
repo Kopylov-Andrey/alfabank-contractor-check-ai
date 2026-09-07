@@ -1,106 +1,116 @@
 # Alfa-Bank · Contractor Check AI
 
-AI-powered counterparty verification platform created for the Alfa-Bank
-hackathon case. The system turns contractor reports into concise, verifiable
-summaries, answers follow-up questions, compares companies without making the
-decision for the user, and clearly separates report data from web sources.
+AI-агент для проверки контрагентов, созданный в рамках хакатон-кейса Альфа-Банка.
 
-> Hackathon prototype. This repository is not an official Alfa-Bank product.
+**«Контрагент — по фактам»** превращает банковский отчёт в короткую проверяемую сводку, отвечает на уточняющие вопросы, показывает основания, сравнивает несколько компаний и при необходимости проверяет конкретные внешние сведения через Web Search.
 
-## Product
+> Hackathon prototype. Репозиторий не является официальным продуктом Альфа-Банка.
 
-The primary user is a procurement specialist or company manager who needs to
-evaluate a new supplier or contractor before signing an agreement or making a
-payment.
+## Что решает продукт
 
-The agent:
+Основной пользователь — закупщик или менеджер юридического лица, которому перед договором, оплатой или выбором поставщика нужно быстро понять факты по новому контрагенту.
 
-- finds a contractor by name or exact tax ID;
-- retrieves a structured report through MCP tools;
-- keeps general risk and the KYC platform indicator separate;
-- distinguishes zero, null, an empty list, and a missing field;
-- answers questions with explicit evidence;
-- uses Web Search only as a clearly labelled secondary source;
-- compares several contractors without selecting a “winner”;
-- never issues a final “work / do not work” verdict.
+Агент:
 
-## Repository structure
+- находит компанию по названию или точному ИНН;
+- получает структурированный отчёт через MCP;
+- формирует сводку и отвечает на точечные вопросы;
+- показывает «Основание из отчёта» с полем, значением, датой и JSON-фрагментом;
+- различает `0`, `null`, пустой список и отсутствующее поле;
+- показывает общий риск и ЗСК как разные индикаторы;
+- использует Web Search только для конкретных внешних вопросов и явно отделяет его от банковского отчёта;
+- сравнивает 2–10 контрагентов по одинаковым фактическим показателям;
+- не создаёт собственный рейтинг и не принимает решение за пользователя.
 
-```text
-apps/
-  product-ui/              Main end-user interface deployment notes; source pending recovery
-  regression-dashboard/   Automated evaluation and quality dashboard
-services/
-  mcp-functions/           Imported Yandex Cloud Function source snapshots exposed through MCP
-  contractor-agent-demo-api/  Deployed demo proxy documentation; source pending import
-prompts/                   Live AI Studio configuration and versioned prompt material
-evals/                     Frozen evaluation artifacts and run results
-docs/                      Product, MVP, evaluation, engineering and deployment documents
-presentation/              Final pitch deck and demo materials
-.github/workflows/         CI and deployment verification
-```
+## Публичный demo
 
-## Current status
+**Product demo:** https://contractor-check-agent-demo.website.yandexcloud.net/
 
-| Component | Status |
-|---|---|
-| Agent in Yandex AI Studio | Implemented and deployed |
-| MCP tools | Implemented; deployed source snapshots imported |
-| Product UI | Deployed in Yandex Object Storage; original source tree not yet recovered |
-| Demo API proxy | Deployed; behavior documented, source pending import |
-| Regression dashboard | Implemented |
-| Frozen evaluation suite | 40 main + 16 repeats + 3 Web Search scenarios |
-| Public product demo | Available in Yandex Object Storage static hosting |
-
-## Deployed path
+Путь запроса:
 
 ```text
 Browser
-  -> contractor-check-agent-demo.website.yandexcloud.net
+  -> Yandex Object Storage static website
   -> contractor-agent-demo-api
-  -> Yandex AI Studio saved agent contractor-check-agent
+  -> Yandex AI Studio / contractor-check-agent
      -> contractor-check-mcp
         -> get-report-by-inn
         -> search-contractors
         -> compare-contractors
      -> Web Search
-  -> contractor-reports Object Storage dataset
+  -> contractor reports in Object Storage
 ```
 
-The inspected deployment snapshot, runtime parameters and security boundaries are documented in
-[`docs/07_deployed_architecture.md`](docs/07_deployed_architecture.md).
+## AI-конфигурация
 
-## Regression dashboard
-
-The dashboard runs 59 scored scenarios across 27 dialogue chains, evaluates
-every answer with an independent LLM judge, stores raw and manual reviews, and
-calculates the release gate metrics.
-
-Local setup and deployment instructions are in
-[`apps/regression-dashboard/README.md`](apps/regression-dashboard/README.md).
-
-## Documentation
-
-- [Client problem and value](docs/01_client_problem_and_value.md)
-- [MVP and product decisions](docs/02_mvp_and_product_decisions.md)
-- [Hypotheses and evaluation](docs/03_hypotheses_evaluation_and_pilot.md)
-- [Frozen AI test cases](docs/04_ai_evaluation_test_cases.md)
-- [Engineering specification](docs/05_engineering_spec_mvp.md)
-- [Agent and prompt requirements](docs/06_agent_prompt_spec.md)
-- [Deployed architecture snapshot](docs/07_deployed_architecture.md)
-- [Live AI Studio configuration](prompts/agent-live-config.md)
-
-## Team
-
-| Member | Role |
+| Параметр | Значение |
 |---|---|
-| Andrey Kopylov | AI Product |
-| Sergey Shcherbakov | AI Engineer |
-| Alexander Chernykh | AI Engineer |
+| Платформа | Yandex AI Studio / Agent Atelier |
+| Модель | `Qwen3.6-35B` |
+| Temperature | `0` |
+| Max output tokens | `12000` |
+| MCP tools | `get-report-by-inn`, `search-contractors`, `compare-contractors` |
+| Web Search | enabled |
 
-## Security
+## Проверка качества
 
-Do not commit API keys, database URLs, Lockbox values, service-account keys,
-AWS-compatible credentials, the private contractor dataset, raw credentials,
-or local `.env` files. The browser-facing UI must call the backend proxy rather
-than receive a Yandex API key directly.
+Для MVP реализован отдельный regression/evaluation dashboard:
+
+- **40** основных кейсов;
+- **16** повторов 8 boundary-сценариев;
+- **3** Web Search сценария;
+- **59** оцениваемых ответов;
+- LLM judge через KAILA;
+- deterministic validator;
+- manual review / override;
+- метрики factual correctness, completeness, source coverage, usefulness, boundary stability, Web labeling и latency.
+
+### Финальный результат
+
+- **40/40 main PASS**;
+- **8/8 stable boundary**;
+- **100% Web labeling**;
+- **0 effective CRITICAL**;
+- **59/59 полный suite**;
+- **p95 latency 8.52 с**;
+- **release gate: PASS**.
+
+Подробности: [`docs/03_hypotheses_evaluation_and_pilot.md`](docs/03_hypotheses_evaluation_and_pilot.md).
+
+## Структура репозитория
+
+```text
+apps/
+  product-ui/                 Публичный продуктовый интерфейс и deployment notes
+  regression-dashboard/      Автоматизированный evaluation dashboard
+services/
+  mcp-functions/              MCP Cloud Functions для отчётов, поиска и сравнения
+  contractor-agent-demo-api/  HTTP proxy публичного demo
+prompts/                      Конфигурация и контракт поведения production-агента
+evals/                        Описание evaluation suite и результатов
+docs/                         Продуктовые и технические документы
+presentation/                 Материалы защиты и demo
+.github/workflows/            CI и deployment smoke
+```
+
+## Документация
+
+1. [Проблема клиента и ценность](docs/01_client_problem_and_value.md)
+2. [MVP и продуктовые решения](docs/02_mvp_and_product_decisions.md)
+3. [Гипотезы и evaluation](docs/03_hypotheses_evaluation_and_pilot.md)
+4. [Эталонный набор AI-тестов](docs/04_ai_evaluation_test_cases.md)
+5. [Техническая спецификация MVP](docs/05_engineering_spec_mvp.md)
+6. [Требования к AI-агенту и production prompt](docs/06_agent_prompt_spec.md)
+7. [Архитектура deployment](docs/07_deployed_architecture.md)
+
+## Команда
+
+| Участник | Роль |
+|---|---|
+| Копылов Андрей Михайлович | AI Product |
+| Щербаков Сергей Владимирович | AI Engineer |
+| Черных Александр Владимирович | AI Engineer |
+
+## Безопасность
+
+API-ключи и сервисные credentials хранятся на серверной стороне. В браузер не передаются Yandex API key, raw MCP payload, reasoning и служебные секреты. Приватный набор отчётов хранится в Yandex Object Storage и не публикуется в репозитории.

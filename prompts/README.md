@@ -1,9 +1,12 @@
-# Agent prompts and live configuration
+# Agent prompts and configuration
 
-This directory stores versioned prompt/configuration material for the saved Yandex AI Studio agent.
+Раздел содержит финальные материалы production-агента Yandex AI Studio.
 
-Current files:
+## Файлы
 
-- [`agent-live-config.md`](agent-live-config.md) — inspected live AI Studio configuration, tool wiring and prompt behavior contract.
+- [`agent-system-v1.md`](agent-system-v1.md) — системный prompt финальной версии агента;
+- [`agent-live-config.md`](agent-live-config.md) — конфигурация saved agent, подключённые MCP tools и Web Search.
 
-The full live system instruction was exported during the deployment audit. When committing a full prompt version, keep it free of credentials, secret infrastructure values and local environment data, and add a short changelog entry describing what changed.
+Production model: `Qwen3.6-35B`, temperature `0`.
+
+Поведенческий контракт и критерии проверки дополнительно описаны в [`docs/06_agent_prompt_spec.md`](../docs/06_agent_prompt_spec.md).

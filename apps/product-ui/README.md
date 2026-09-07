@@ -1,37 +1,39 @@
 # Product UI
 
-The current public demo is deployed as a static site in Yandex Object Storage:
+Публичный demo интерфейс продукта размещён в Yandex Object Storage:
 
-`https://contractor-check-agent-demo.website.yandexcloud.net/`
+**https://contractor-check-agent-demo.website.yandexcloud.net/**
 
-Observed bucket: `contractor-check-agent-demo`.
-
-## What is currently available
-
-The bucket contains a production build only:
-
-```text
-assets/
-favicon.svg
-index.html
-og.png
-```
-
-The `assets/` directory contains hashed JavaScript and CSS bundles from several successive builds. No source maps were observed. The original frontend source tree (`src/`, `package.json`, build config, etc.) has not yet been located, so it is not reconstructed from minified production assets here.
-
-## Runtime path
+## Пользовательский сценарий
 
 ```text
 Browser
   -> Object Storage static website
-  -> contractor-agent-demo-api Cloud Function
+  -> contractor-agent-demo-api
   -> Yandex AI Studio saved agent
 ```
 
-The browser must not receive a Yandex API key. The deployed backend proxy accepts requests with `X-Demo-Token` and keeps the Yandex credential server-side.
+Интерфейс поддерживает:
 
-## Import TODO
+- ввод ИНН или названия компании;
+- получение сводки по контрагенту;
+- уточняющий диалог;
+- панель «Основание из отчёта»;
+- отображение Web citations;
+- сравнение нескольких компаний.
 
-When the original source project becomes available, place it in this directory without `node_modules`, generated `dist/` history, API keys or local secret files. Preserve the deployed build only as a reference artifact if needed; source files should be canonical.
+## Evidence panel
 
-See [`docs/07_deployed_architecture.md`](../../docs/07_deployed_architecture.md) for the inspected deployment snapshot.
+Для первого ответа по новому отчёту UI показывает ограниченный набор точных оснований:
+
+- название факта;
+- поле отчёта;
+- значение;
+- дату отчёта;
+- JSON-фрагмент.
+
+## Security
+
+Браузер не получает Yandex API key и raw MCP payload. Все обращения к saved agent проходят через `contractor-agent-demo-api`.
+
+Полная архитектура: [`docs/07_deployed_architecture.md`](../../docs/07_deployed_architecture.md).

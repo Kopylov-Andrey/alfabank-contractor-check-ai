@@ -1,8 +1,9 @@
-# Deployed architecture snapshot
+# Архитектура развёрнутого MVP
 
-This document records the Yandex Cloud deployment inspected on 2026-09-06. It is a deployment snapshot, not a replacement for the product or engineering specifications.
+**Статус:** финальная версия к защите  
+**Дата:** 7 сентября 2026 года
 
-## End-user path
+## 1. End-to-end путь
 
 ```text
 Browser
@@ -16,151 +17,106 @@ Browser
      -> get-report-by-inn
      -> search-contractors
      -> compare-contractors
-  -> Object Storage bucket contractor-reports
-     -> reports_by_inn.json
+  -> Object Storage: contractor-reports/reports_by_inn.json
 
-The agent also has Web Search enabled with search_context_size=medium.
+Дополнительный инструмент агента: Web Search.
 ```
 
-## Saved AI Studio agent
+## 2. Saved AI Studio agent
 
-Observed configuration:
+| Параметр | Значение |
+|---|---|
+| Agent | `contractor-check-agent` |
+| Model | `Qwen3.6-35B` |
+| Temperature | `0` |
+| Max output tokens | `12000` |
+| MCP approval | `never` |
+| Web Search context size | `medium` |
 
-- name: `contractor-check-agent`
-- model: `Qwen3.6-35B`
-- temperature: `0`
-- max output tokens: `12000`
-- Responses API base URL: `https://ai.api.cloud.yandex.net/v1`
-- project/folder id: `b1gfdj9gscod1qetbbpj`
-- saved prompt id: `fvtq3dj5gqmo38h4mk94`
-- MCP server label: `contractor-check-mcp`
-- MCP server URL: `https://db81uub1t2h5sr9vjs0u.fi4781wp.mcpgw.serverless.yandexcloud.net`
-- MCP approval mode: `never`
-- Web Search context size: `medium`
+Агент получает системный prompt из сохранённой конфигурации AI Studio. Web Search подключён отдельно от MCP и используется по правилам production prompt.
 
-Reference call shape from AI Studio:
+## 3. MCP server
 
-```python
-import openai
+`contractor-check-mcp` работает через HTTP/SSE и предоставляет три инструмента.
 
-client = openai.OpenAI(
-    api_key="<API_key_value>",
-    base_url="https://ai.api.cloud.yandex.net/v1",
-    project="b1gfdj9gscod1qetbbpj",
-)
+### `get-report-by-inn`
 
-response = client.responses.create(
-    prompt={"id": "fvtq3dj5gqmo38h4mk94"},
-    input="some message",
-    tools=[
-        {
-            "type": "mcp",
-            "server_label": "contractor-check-mcp",
-            "server_url": "https://db81uub1t2h5sr9vjs0u.fi4781wp.mcpgw.serverless.yandexcloud.net",
-            "server_description": "",
-            "require_approval": "never",
-        },
-        {
-            "type": "web_search",
-            "filters": {"allowed_domains": []},
-            "search_context_size": "medium",
-        },
-    ],
-)
-```
+- runtime: Python 3.12;
+- читает `reports_by_inn.json` из Object Storage;
+- принимает ИНН из 10 или 12 цифр;
+- поддерживает `full`, `compact` и `sections` projections;
+- сохраняет семантическое различие между отсутствующим полем, `null`, пустым массивом и значением.
 
-Never commit a real API key.
+### `search-contractors`
 
-## MCP server
+Выполняет нормализованный поиск по названиям, адресу и видам деятельности и возвращает до 20 релевантных совпадений.
 
-Observed MCP server properties:
+### `compare-contractors`
 
-- transport: HTTP with SSE
-- access: private
-- service account: `storage-reader-sa`
-- tools:
-  - `get-report-by-inn`
-  - `search-contractors`
-  - `compare-contractors`
+Принимает 2–10 ИНН и возвращает данные по всем компаниям одним MCP-вызовом с тем же projection-контрактом.
 
-### get-report-by-inn
+## 4. Demo API proxy
 
-Cloud Function runtime snapshot:
+`contractor-agent-demo-api` связывает публичный интерфейс с saved agent.
 
-- runtime: Python 3.12
-- entrypoint: `index.handler`
-- timeout: 5 seconds
-- memory: 256 MB
-- service account: `storage-reader-sa`
-- mounted bucket: `contractor-reports`
-- mount path: `/function/storage/contractor-reports`
-- mount mode: read-only
+Основные функции:
 
-The function reads `reports_by_inn.json` from the mounted bucket and falls back to S3-compatible Object Storage access. It supports `full`, `compact` and `sections` projections.
+- принимает `POST {"message": "...", "previous_response_id": "..."}`;
+- использует `X-Demo-Token`;
+- хранит Yandex API key только на серверной стороне;
+- валидирует ИНН перед первым запросом;
+- возвращает финальный текст, HTTPS citations, response id, latency и evidence whitelist;
+- не передаёт в браузер raw MCP payload, reasoning и секреты;
+- проверяет origin публичного сайта.
 
-### search-contractors
+## 5. Evidence panel
 
-The function searches normalized text over contractor names, address and activity descriptions, returns at most 20 results and exposes `inn`, `name`, `riskLevel` and `address`.
+Для первого ответа по новому отчёту demo API возвращает ограниченный набор точных оснований. UI показывает:
 
-The inspected deployment uses `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables for S3-compatible Object Storage access. Real values must not be committed.
+- название факта;
+- поле отчёта;
+- точное значение;
+- дату отчёта;
+- JSON-фрагмент.
 
-### compare-contractors
+Перед возвратом evidence proxy сверяет ИНН и проецирует только разрешённые значения.
 
-The function accepts 2-10 INNs, validates them, returns a report or a per-INN not-found marker, and applies the same `full`, `compact` or `sections` projection contract as `get-report-by-inn`.
+## 6. Product UI
 
-## Demo API proxy
+Публичный интерфейс размещён в Yandex Object Storage:
 
-Observed Cloud Function: `contractor-agent-demo-api`.
+**https://contractor-check-agent-demo.website.yandexcloud.net/**
 
-Its deployed README states that it:
+UI реализует основной пользовательский сценарий: запрос → сводка → evidence → follow-up → Web Search или сравнение при необходимости.
 
-- is an HTTP proxy between the public demo UI and the saved AI Studio agent;
-- reads `YANDEX_API_KEY` from Lockbox-backed environment configuration;
-- accepts only `POST {"message": "...", "previous_response_id": "..."}` with `X-Demo-Token`;
-- returns final text, HTTPS citations, response id, latency and a small evidence whitelist;
-- keeps raw MCP payload, reasoning and secrets server-side;
-- validates INN before the first request;
-- uses an evidence mode for the first response with a new report;
-- restricts allowed origins to the published Object Storage site, a rollback Sites URL and local development.
+## 7. Данные
 
-Source files observed in the Cloud Function editor:
+Приватный набор контрагентов хранится в Yandex Object Storage в `reports_by_inn.json`. Клиентская часть не получает прямого доступа к исходному dataset.
+
+## 8. Безопасность
+
+В серверном контуре остаются:
+
+- Yandex API keys;
+- Lockbox values;
+- service-account credentials;
+- Object Storage credentials;
+- raw MCP payload;
+- служебные данные выполнения агента.
+
+Публичный браузер работает только через demo API proxy.
+
+## 9. Контур качества
+
+Отдельный regression dashboard обращается к тому же saved agent и выполняет frozen suite из 59 scored cases.
 
 ```text
-index.py
-README.md
-test_index.py
+Regression dashboard
+  -> Yandex AI Studio agent
+  -> LLM judge / KAILA
+  -> deterministic validator
+  -> manual review / override
+  -> PostgreSQL/SQLite
 ```
 
-The source code itself has not yet been imported into this repository.
-
-## Product UI deployment
-
-The public UI is deployed from Yandex Object Storage bucket `contractor-check-agent-demo` and is available at:
-
-`https://contractor-check-agent-demo.website.yandexcloud.net/`
-
-Observed bucket contents:
-
-```text
-assets/
-favicon.svg
-index.html
-og.png
-```
-
-The `assets/` directory contains hashed JavaScript and CSS bundles from several successive builds. No source maps were observed. Therefore the bucket contains a production build, not the original frontend source tree.
-
-Original frontend sources have not yet been located. Until they are recovered, `apps/product-ui/` documents the deployed artifact and the missing-source status.
-
-## Data boundary
-
-The private contractor dataset is stored in Object Storage bucket `contractor-reports` as `reports_by_inn.json`.
-
-Do not commit the full dataset, Lockbox values, service-account keys, AWS-compatible credentials, local `.env` files or Yandex API keys.
-
-## Still missing from the repository
-
-- original Product UI source tree (`src/`, `package.json`, build config, etc.);
-- source code of `contractor-agent-demo-api`;
-- deployment metadata/scripts for publishing the Product UI build;
-- frozen production evaluation exports, when the final run is ready.
+Финальный release gate пройден. Подробные метрики описаны в [`03_hypotheses_evaluation_and_pilot.md`](03_hypotheses_evaluation_and_pilot.md).

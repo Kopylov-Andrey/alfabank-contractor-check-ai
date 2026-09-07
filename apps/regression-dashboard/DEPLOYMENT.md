@@ -1,64 +1,75 @@
-# Настройка публичного стенда
+# Deployment regression dashboard
 
-Перед обновлением 6 сентября прочитайте [CHANGE_REPORT.md](CHANGE_REPORT.md):
-остановить старую версию, сделать backup БД, запустить один новый worker.
-Добавляется nullable runs.provenance без заполнения исторических версий.
-Для PostgreSQL необходим session/direct connection; transaction pooler
-несовместим с блокировкой единственного worker. Реальное обновление стенда
-и платные smoke-прогоны в этой задаче не выполнялись.
+Dashboard разворачивается как один FastAPI web service с внешней PostgreSQL БД или локальной SQLite.
 
-## Секреты Koyeb
+## Переменные окружения
 
-| Переменная | Назначение | Публичная |
-|---|---|---|
-| `YANDEX_API_KEY` | Вызов тестируемого агента | Нет |
-| `YANDEX_FOLDER_ID` | Каталог Yandex Cloud | Нет |
-| `YANDEX_AGENT_ID` | ID сохранённого агента | Нет |
-| `MCP_SERVER_URL` | MCP Gateway | Нет |
-| `JUDGE_API_KEY` | Доступ к KAILA | Нет |
-| `JUDGE_BASE_URL` | OpenAI-compatible endpoint | Нет |
-| `JUDGE_MODELS` | Allowlist моделей для UI | Можно |
-| `DEFAULT_JUDGE_MODEL` | Модель по умолчанию | Можно |
-| `DATABASE_URL` | PostgreSQL Supabase | Нет |
-| `ADMIN_TOKEN` | Запуск и ручная оценка | Нет |
+| Переменная | Назначение |
+|---|---|
+| `YANDEX_API_KEY` | Вызов тестируемого агента |
+| `YANDEX_FOLDER_ID` | Yandex Cloud folder |
+| `YANDEX_AGENT_ID` | Saved agent ID |
+| `MCP_SERVER_URL` | MCP Gateway |
+| `JUDGE_API_KEY` | Доступ к KAILA |
+| `JUDGE_BASE_URL` | OpenAI-compatible endpoint |
+| `JUDGE_MODELS` | Allowlist моделей судьи |
+| `DEFAULT_JUDGE_MODEL` | Модель по умолчанию |
+| `DATABASE_URL` | PostgreSQL / SQLite |
+| `ADMIN_TOKEN` | Защита запуска и manual review |
+| `MAX_CONCURRENCY` | Параллельность диалогов |
+| `REQUEST_TIMEOUT_SECONDS` | Тайм-аут интеграций |
 
-## Проверка после деплоя
+Пример значений без секретов находится в `.env.example`.
 
-1. Открыть `/api/health`.
-2. Убедиться, что обе интеграции имеют состояние `true`.
-3. Ввести `ADMIN_TOKEN` через кнопку «Токен запуска».
-4. Выполнить сначала набор `boundary` или отдельный smoke до полного прогона.
-5. Проверить, что после перезапуска сервиса созданный прогон сохранился.
+## Docker
 
-## GitHub Actions и автодеплой
-
-В репозитории уже есть два workflow:
-
-- `CI` — запускает pytest, компиляцию Python, проверку JavaScript и сборку
-  production Docker image на каждый push и pull request;
-- `Deployment smoke` — после успешного CI ждёт автодеплой Koyeb и проверяет
-  `/api/health`.
-
-В настройках репозитория добавьте Actions secret:
-
-```text
-APP_HEALTH_URL=https://<ваш-сервис>.koyeb.app/api/health
+```bash
+docker build -t contractor-regression .
+docker run --env-file .env -p 8000:8000 contractor-regression
 ```
 
-В Koyeb включите autodeploy для ветки `main`. Чтобы не развернуть commit с
-падающими тестами, включите в GitHub branch protection для `main`:
+После запуска проверить:
 
-1. Require a pull request before merging.
-2. Require status checks to pass.
-3. Выберите проверки `Tests and static checks` и `Docker build`.
+```text
+GET /api/health
+```
 
-Поток: PR → CI → merge в `main` → Koyeb autodeploy → deployment health-check.
+`agent_configured` и `judge_configured` должны быть `true`.
 
-## Рекомендуемый порядок релиза
+## Koyeb / аналогичный PaaS
 
-1. Локальная проверка с SQLite.
-2. Подключение Supabase.
-3. Деплой в Koyeb из GitHub.
-4. Smoke на минимальном наборе.
-5. Полный frozen-прогон без изменения тестов и промпта.
-6. Ручной аудит всех `PARTIAL`, `FAIL`, `CRITICAL` и случайной выборки `PASS`.
+1. Подключить GitHub repository.
+2. Выбрать сборку через `Dockerfile`.
+3. Добавить переменные окружения как secrets.
+4. Подключить PostgreSQL через `DATABASE_URL`.
+5. Использовать один backend worker для runner.
+6. Включить autodeploy для основной ветки.
+7. Проверить `/api/health` после релиза.
+
+## GitHub Actions
+
+Репозиторий содержит:
+
+- `CI` — pytest, Python compile, JavaScript checks и Docker build;
+- `Deployment smoke` — проверка health endpoint после deployment.
+
+Для deployment smoke задаётся repository secret:
+
+```text
+APP_HEALTH_URL=https://<service>/api/health
+```
+
+## Рекомендуемый release flow
+
+```text
+PR
+ -> CI
+ -> merge
+ -> autodeploy
+ -> /api/health
+ -> smoke scope
+ -> full frozen regression suite
+ -> review результатов
+```
+
+Канонический полный suite содержит 59 scored cases. Финальный release gate проекта пройден; критерии описаны в [`../../docs/03_hypotheses_evaluation_and_pilot.md`](../../docs/03_hypotheses_evaluation_and_pilot.md).

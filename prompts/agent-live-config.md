@@ -1,6 +1,6 @@
 # Live AI Studio agent configuration
 
-Snapshot inspected on 2026-09-06.
+**Дата:** 7 сентября 2026 года
 
 ## Agent
 
@@ -10,75 +10,39 @@ Snapshot inspected on 2026-09-06.
 - temperature: `0`
 - max output tokens: `12000`
 - saved prompt id: `fvtq3dj5gqmo38h4mk94`
-- project/folder id: `b1gfdj9gscod1qetbbpj`
 
 ## Tools
 
 ### MCP
 
-- label: `contractor-check-mcp`
-- URL: `https://db81uub1t2h5sr9vjs0u.fi4781wp.mcpgw.serverless.yandexcloud.net`
-- approval: `never`
-- transport observed in Yandex Cloud: HTTP with SSE
+Server label: `contractor-check-mcp`.
 
-Tools exposed by the MCP server:
+Подключённые инструменты:
 
-- `get-report-by-inn`
-- `search-contractors`
-- `compare-contractors`
+- `get-report-by-inn`;
+- `search-contractors`;
+- `compare-contractors`.
+
+MCP используется как основной источник данных банковского отчёта.
 
 ### Web Search
 
-- enabled
-- `search_context_size = medium`
-- no allowed-domain restriction was configured in the generated call example
+- enabled;
+- `search_context_size = medium`;
+- используется для конкретных внешних вопросов по правилам production prompt;
+- внешние сведения явно отделяются от данных отчёта.
 
-## Prompt behavior captured from the live configuration
+## Ключевые правила поведения
 
-The live system instruction supplied during the repository audit defines these core contracts:
+- ИНН определяется только через MCP;
+- активная компания не меняется неявно;
+- общий риск и ЗСК показываются отдельно;
+- `0`, `null`, `[]` и отсутствующее поле имеют разную семантику;
+- Web Search не подменяет банковский отчёт;
+- сравнение нескольких компаний не превращается в собственный рейтинг;
+- итоговое решение остаётся за пользователем;
+- фактические ответы сопровождаются источником.
 
-- use MCP as the authoritative source for company identity and report facts;
-- never use Web Search to discover or verify an INN;
-- keep general risk (`baseInfo.riskLevel`) and ZSK risk (`zskRiskLevel`) separate;
-- distinguish `0`, `null`, `[]` and an absent field;
-- use `compact`, `sections` and `full` report projections intentionally;
-- separate report evidence from Web Search evidence;
-- do not issue a final work / do-not-work verdict or rank companies by reliability;
-- use the `[CLIENT_EVIDENCE_V1]` marker only for the client evidence-tab mode;
-- enforce source labels and narrow answer formats for point questions;
-- handle technical errors and ambiguous contractor selection without guessing.
+Полный system prompt: [`agent-system-v1.md`](agent-system-v1.md).
 
-The full live system instruction was exported during the audit but is not duplicated in this file. Keep any future full prompt export free of credentials and secret infrastructure values.
-
-## Responses API call shape
-
-```python
-import openai
-
-client = openai.OpenAI(
-    api_key="<API_key_value>",
-    base_url="https://ai.api.cloud.yandex.net/v1",
-    project="b1gfdj9gscod1qetbbpj",
-)
-
-response = client.responses.create(
-    prompt={"id": "fvtq3dj5gqmo38h4mk94"},
-    input="some message",
-    tools=[
-        {
-            "type": "mcp",
-            "server_label": "contractor-check-mcp",
-            "server_url": "https://db81uub1t2h5sr9vjs0u.fi4781wp.mcpgw.serverless.yandexcloud.net",
-            "server_description": "",
-            "require_approval": "never",
-        },
-        {
-            "type": "web_search",
-            "filters": {"allowed_domains": []},
-            "search_context_size": "medium",
-        },
-    ],
-)
-```
-
-Never commit a real API key.
+Поведенческий контракт: [`../docs/06_agent_prompt_spec.md`](../docs/06_agent_prompt_spec.md).

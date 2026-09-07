@@ -1,38 +1,57 @@
 # Agent Regression Lab
 
-Обновление 6 сентября: светлый интерфейс, история и сравнение, безопасная
-остановка/удаление, промпт **судьи** judge-v2.0 и строгий JSON-контракт.
-Основной агент не изменён.
-[Отчёт об изменениях и миграция](CHANGE_REPORT.md) ·
-[Контракт судьи и план проверки](JUDGE.md).
+Автоматизированный dashboard для воспроизводимой проверки `contractor-check-agent`.
 
-Публичный dashboard для воспроизводимой проверки `contractor-check-agent`:
+## Что проверяется
+
+Полный regression suite:
 
 - 40 основных сценариев;
-- 16 повторов восьми boundary-сценариев;
-- 3 сценария Web Search;
-- 27 независимых диалогов и 86 вызовов агента вместе с setup-turns;
-- оценка каждого ответа отдельной LLM-судьёй;
-- независимая алгоритмическая проверка точных фактов и критических условий;
-- ручная корректировка оценки с комментарием;
-- метрики качества, latency, usage, citations и tool calls;
-- сравнение версий промпта и моделей;
-- PostgreSQL в облаке, SQLite локально.
-- GitHub Actions: тесты, Docker build и smoke после деплоя.
+- 16 повторов 8 boundary-сценариев;
+- 3 Web Search сценария;
+- 59 оцениваемых ответов;
+- 27 независимых диалогов;
+- 86 вызовов агента вместе с setup-turns.
 
 ## Архитектура
 
-```mermaid
-flowchart LR
-    UI[Public dashboard] --> API[FastAPI backend]
-    API --> YA[Yandex Responses API]
-    API --> J[LLM judge via KAILA]
-    API --> V[Deterministic validator]
-    API --> DB[(PostgreSQL)]
+```text
+Public dashboard
+  -> FastAPI backend
+  -> Yandex Responses API / contractor-check-agent
+  -> LLM judge via KAILA
+  -> deterministic validator
+  -> PostgreSQL / SQLite
 ```
 
-Просмотр результатов публичный. Запуск прогонов, остановка, удаление и ручное изменение
-оценки требуют `ADMIN_TOKEN`. API-ключи никогда не передаются в браузер.
+Dashboard поддерживает:
+
+- запуск полного, main и boundary scope;
+- LLM judge с `PASS / PARTIAL / FAIL / CRITICAL`;
+- deterministic validation точных фактов и критических условий;
+- manual review / override;
+- latency, usage, citations и tool calls;
+- сравнение прогонов;
+- CSV export;
+- HTML report для печати в PDF;
+- PostgreSQL в облаке и SQLite локально.
+
+## Release gate
+
+| Метрика | Порог |
+|---|---:|
+| GTSR | ≥34/40 |
+| Factual correctness | ≥90% |
+| Completeness | ≥90% |
+| Source coverage | ≥95% |
+| Usefulness | ≥80% |
+| False refusals | ≤3 |
+| Stable boundary | ≥7/8 |
+| Web labeling | 100% |
+| LLM CRITICAL | 0 |
+| Combined CRITICAL | 0 |
+
+Финальный suite завершён: 59/59, 40/40 main PASS, 8/8 stable boundary, 100% Web labeling, 0 effective CRITICAL. Release gate — PASS.
 
 ## Быстрый запуск
 
@@ -43,123 +62,69 @@ pip install -r requirements-dev.txt
 cp .env.example .env            # Windows: copy .env.example .env
 ```
 
-Заполните в `.env`:
-
-- `YANDEX_API_KEY` — ключ проверяемого агента;
-- `JUDGE_BASE_URL` и `JUDGE_API_KEY` — OpenAI-compatible KAILA endpoint;
-- `JUDGE_MODELS` — разрешённые модели через запятую;
-- `ADMIN_TOKEN` — длинная случайная строка.
-
-Затем:
+Заполните `.env` и запустите:
 
 ```bash
 uvicorn app.main:app --env-file .env --workers 1
 ```
 
-Сайт откроется на `http://localhost:8000`. Без `DATABASE_URL` используется
-локальный `regression.db`. Перед первым обновлением остановите прежний backend
-и сохраните копию БД: при старте добавляется nullable provenance и фиксируются
-прерванные задания. Подробности — в CHANGE_REPORT.md.
+Локально интерфейс доступен на `http://localhost:8000`.
 
-## Как устроен полный прогон
+## Основные переменные
 
-Основные пять вопросов каждой из восьми компаний идут в одном диалоге после
-setup-turn. Каждый из 16 повторов boundary-сценариев и каждый из трёх Web
-сценариев получает отдельный setup-turn. Итого: 59 оцениваемых ответов,
-27 setup-turns и 86 API-запросов.
+- `YANDEX_API_KEY` — доступ к тестируемому агенту;
+- `YANDEX_AGENT_ID` — saved agent ID;
+- `MCP_SERVER_URL` — MCP Gateway;
+- `JUDGE_API_KEY` — доступ к KAILA;
+- `JUDGE_BASE_URL` — OpenAI-compatible endpoint;
+- `JUDGE_MODELS` — allowlist моделей судьи;
+- `DEFAULT_JUDGE_MODEL` — модель по умолчанию;
+- `DATABASE_URL` — PostgreSQL или SQLite;
+- `ADMIN_TOKEN` — защита управляющих действий.
 
-Диалоги продолжаются через `previous_response_id`. Одновременно выполняется не
-более `MAX_CONCURRENCY` диалогов. Внутри одного диалога порядок строго
-последовательный.
+## LLM judge
 
-## LLM-судья
+Judge получает:
 
-Backend отправляет судье вопрос, ожидаемые факты, обязательные основания,
-запрещённые формулировки, условие критической ошибки, ответ агента, citations и
-tool calls. Судья возвращает JSON с:
+- вопрос;
+- expected facts;
+- обязательные основания;
+- запрещённые утверждения;
+- условие CRITICAL;
+- ответ агента;
+- citations;
+- tool calls.
 
-- `PASS / PARTIAL / FAIL / CRITICAL`;
-- фактической корректностью и полнотой;
-- покрытием источниками;
-- полезностью и ложными отказами;
-- вердиктами за пользователя;
-- использованием и маркировкой Web Search;
-- причиной оценки, пропусками и неподтверждёнными тезисами.
+Результат включает статус и отдельные признаки factual correctness, completeness, source coverage, usefulness, false refusal и Web Search behavior.
 
-Модель выбирается на сайте только из серверного `JUDGE_MODELS`. Это защищает от
-подстановки произвольной дорогой модели в публичном интерфейсе.
+## Deterministic validator
 
-## Алгоритмическая проверка
+`app/data/algorithmic_rules.json` содержит машинные правила для проверки:
 
-Правила из `app/data/algorithmic_rules.json` проверяют точные ИНН, компании,
-даты, суммы, статусы, уровни риска, обязательные факты и явно запрещённые
-утверждения. Валидатор использует только стандартную библиотеку Python и не
-оценивает стиль, полезность или качество источников.
+- ИНН и компании;
+- дат и сумм;
+- уровней общего риска и ЗСК;
+- обязательных фактов;
+- запрещённых формулировок;
+- критических условий.
 
-LLM-статус остаётся основным. Только алгоритмический `CRITICAL` меняет итоговый
-`auto_status` на `CRITICAL`; любое другое расхождение сохраняет LLM-статус и
-выставляет `requires_manual_review=true`. Ручная оценка по-прежнему имеет
-приоритет при отображении эффективного статуса.
+LLM judge и deterministic validator работают независимо. Спорные расхождения могут быть отмечены для manual review.
 
-## Экспорт отчётов
+## Экспорт
 
-### CSV-экспорт полной таблицы результатов
+### CSV
 
-Endpoint: `GET /api/runs/{run_id}/export/csv`
+`GET /api/runs/{run_id}/export/csv`
 
-Скачивает CSV-файл со всеми результатами прогона:
-- Исходные колонки и дополнительные: идентификация/версии/неполнота прогона,
-  case_id, attempt, question, answer, отдельные статусы LLM/алгоритм/combined/manual/effective
-- Алгоритмические детали: требуемые факты, запрещённые утверждения, критические флаги
-- Готов для импорта в Excel, pandas, Google Sheets
-- Кодировка UTF-8 с BOM для корректного открытия в Excel
+Содержит вопросы, ответы, статусы, judge/algorithmic детали, версии и latency.
 
-**UI:** «Действия → Скачать CSV» у открытого прогона; CSV также доступен в истории.
-Текстовые значения защищены от spreadsheet formula injection.
+### HTML report
 
-### PDF-отчёт (HTML для печати)
+`GET /api/runs/{run_id}/export/pdf`
 
-Endpoint: `GET /api/runs/{run_id}/export/pdf`
+Возвращает HTML-отчёт с release gate, quality metrics и performance, подготовленный для печати в PDF.
 
-Скачивает HTML-отчёт с метриками качества:
-- Release gate и прогресс выполнения
-- Основные метрики: GTSR, factual correctness, completeness, source coverage
-- Распределение статусов (LLM и алгоритмический)
-- Алгоритмические метрики: покрытие фактов, запрещённые утверждения, CRITICAL-флаги
-- Performance: latency (mean/median/p95/max)
-- Стилизован для печати в PDF через браузер (Ctrl+P → Сохранить как PDF)
-
-**UI:** «Действия → Отчёт / Печать в PDF». Возвращается HTML, не готовый PDF.
-
-**Примечание:** HTML-формат выбран для гибкости — можно открыть в браузере и сохранить
-как PDF встроенными средствами, либо использовать headless Chrome/Playwright для
-автоматической генерации PDF в CI/CD.
-
-## PostgreSQL / Supabase
-
-1. Создайте бесплатный проект Supabase.
-2. Скопируйте PostgreSQL connection string.
-3. Укажите его как `DATABASE_URL` в формате `postgresql://...`.
-
-Приложение автоматически создаст таблицы `runs` и `results` при старте.
-Один worker удерживает session advisory lock; используйте прямое/session
-соединение PostgreSQL, не transaction-mode pooler.
-
-## Бесплатный деплой на Koyeb
-
-1. Создайте GitHub-репозиторий и отправьте туда этот проект.
-2. В Koyeb выберите **Create Web Service → GitHub**.
-3. Выберите репозиторий и сборку через `Dockerfile`.
-4. Выберите Free instance.
-5. Добавьте все переменные из `.env.example` в Secrets/Environment Variables.
-6. Для `DATABASE_URL` используйте строку подключения Supabase.
-7. Проверьте `/api/health`: `agent_configured` и `judge_configured` должны быть `true`.
-
-Важно: бесплатный публичный backend может «засыпать». Первый запрос после
-простоя будет медленнее. История не потеряется, потому что она хранится во
-внешнем PostgreSQL.
-
-## Проверки
+## Проверки репозитория
 
 ```bash
 pytest -q
@@ -168,12 +133,10 @@ python -m compileall -q app
 node tests/browser-smoke.mjs
 ```
 
-## Ограничения первого релиза
+## Связанные документы
 
-- Реальные CAILA/Yandex и калибровка judge-v2.0 требуют отдельной проверки.
-- Фоновый runner рассчитан на один backend worker. Для нескольких worker или
-  долгого production-процесса нужен отдельный job queue. Второй обновлённый
-  worker отклоняется до восстановления задач; interrupted-прогоны не
-  возобновляют платные запросы автоматически.
-- Оценка LLM-судьи не считается абсолютной истиной: ручная корректировка и
-  комментарий сохраняются отдельно, не уничтожая исходную оценку.
+- [`../../docs/03_hypotheses_evaluation_and_pilot.md`](../../docs/03_hypotheses_evaluation_and_pilot.md) — критерии и финальный результат;
+- [`../../docs/04_ai_evaluation_test_cases.md`](../../docs/04_ai_evaluation_test_cases.md) — человекочитаемая спецификация suite;
+- [`app/data/test_cases.json`](app/data/test_cases.json) — канонические машинные test cases;
+- [`HOW_TO_ADD_MODELS.md`](HOW_TO_ADD_MODELS.md) — конфигурация моделей судьи;
+- [`DEPLOYMENT.md`](DEPLOYMENT.md) — deployment dashboard.
